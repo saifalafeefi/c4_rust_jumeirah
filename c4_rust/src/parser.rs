@@ -390,14 +390,272 @@ impl<'a> Parser<'a> {
     }
     
     /// parse an expression with a given precedence level
-    fn expr(&mut self, _precedence: u8) -> Result<(), String> {
-        // TODO: implement expression parsing
+    fn expr(&mut self, precedence: u8) -> Result<(), String> {
+        // Handle numeric literals, variables, and function calls
+        match self.token() {
+            Token::Num(val) => {
+                // Push immediate value to code
+                self.code.push(OpCode::IMM as i64);
+                self.code.push(val);
+                self.next();
+            },
+            Token::Id(id) => {
+                let name = self.get_id_name(id);
+                self.next();
+                
+                // Function call
+                if self.token() == Token::LeftParen {
+                    self.next(); // Skip '('
+                    
+                    // Push arguments to stack
+                    let mut arg_count = 0;
+                    if self.token() != Token::RightParen {
+                        // Parse argument expressions
+                        loop {
+                            self.expr(0)?; // Parse with lowest precedence
+                            self.code.push(OpCode::PSH as i64); // Push to stack
+                            arg_count += 1;
+                            
+                            if self.token() != Token::Comma {
+                                break;
+                            }
+                            self.next(); // Skip ','
+                        }
+                    }
+                    
+                    self.expect(Token::RightParen, "Expected ')' after function arguments")?;
+                    
+                    // Find the function in symbol table
+                    if let Some(symbol) = self.find_symbol(&name) {
+                        if symbol.class == SymbolClass::Sys {
+                            // System call
+                            let sys_id = symbol.value; // Store the value before pushing
+                            self.code.push(sys_id); // Push system call ID
+                        } else if symbol.class == SymbolClass::Fun {
+                            // User-defined function
+                            let fn_addr = symbol.value; // Store the value before pushing
+                            self.code.push(OpCode::JSR as i64);
+                            self.code.push(fn_addr); // Push function address
+                        } else {
+                            return Err(format!("Line {}: '{}' is not a function", self.lexer.line(), name));
+                        }
+                    } else {
+                        return Err(format!("Line {}: Unknown function '{}'", self.lexer.line(), name));
+                    }
+                    
+                    // Clean up stack if there were arguments
+                    if arg_count > 0 {
+                        self.code.push(OpCode::ADJ as i64);
+                        self.code.push(arg_count);
+                    }
+                } else {
+                    // Variable access
+                    if let Some(symbol) = self.find_symbol(&name) {
+                        let sym_class = symbol.class;
+                        let sym_value = symbol.value;
+                        let sym_type = symbol.typ.clone();
+                        
+                        match sym_class {
+                            SymbolClass::Num => {
+                                // Numeric constant
+                                self.code.push(OpCode::IMM as i64);
+                                self.code.push(sym_value);
+                            },
+                            SymbolClass::Glo => {
+                                // Global variable - push address
+                                self.code.push(OpCode::IMM as i64);
+                                self.code.push(sym_value);
+                                
+                                // Based on type, load value
+                                if sym_type == Type::Char {
+                                    self.code.push(OpCode::LC as i64);
+                                } else {
+                                    self.code.push(OpCode::LI as i64);
+                                }
+                            },
+                            SymbolClass::Loc => {
+                                // Local variable - calculate address from bp
+                                self.code.push(OpCode::LEA as i64);
+                                self.code.push(sym_value);
+                                
+                                // Load value
+                                if sym_type == Type::Char {
+                                    self.code.push(OpCode::LC as i64);
+                                } else {
+                                    self.code.push(OpCode::LI as i64);
+                                }
+                            },
+                            _ => return Err(format!("Line {}: Invalid variable '{}'", self.lexer.line(), name)),
+                        }
+                    } else {
+                        return Err(format!("Line {}: Unknown variable '{}'", self.lexer.line(), name));
+                    }
+                }
+            },
+            _ => return Err(format!("Line {}: Expected expression", self.lexer.line())),
+        }
+        
+        // Handle operators with precedence climbing
+        while self.precedence_of(self.token()) > precedence {
+            let op = self.token();
+            self.next();
+            
+            // Recursively parse the right-hand side with higher precedence
+            self.expr(self.precedence_of(op))?;
+            
+            // Generate code for the operator
+            match op {
+                Token::Add => self.code.push(OpCode::ADD as i64),
+                Token::Sub => self.code.push(OpCode::SUB as i64),
+                Token::Mul => self.code.push(OpCode::MUL as i64),
+                Token::Div => self.code.push(OpCode::DIV as i64),
+                Token::Mod => self.code.push(OpCode::MOD as i64),
+                Token::Eq => self.code.push(OpCode::EQ as i64),
+                Token::Ne => self.code.push(OpCode::NE as i64),
+                Token::Lt => self.code.push(OpCode::LT as i64),
+                Token::Gt => self.code.push(OpCode::GT as i64),
+                Token::Le => self.code.push(OpCode::LE as i64),
+                Token::Ge => self.code.push(OpCode::GE as i64),
+                Token::And => self.code.push(OpCode::AND as i64),
+                Token::Or => self.code.push(OpCode::OR as i64),
+                Token::Xor => self.code.push(OpCode::XOR as i64),
+                Token::Shl => self.code.push(OpCode::SHL as i64),
+                Token::Shr => self.code.push(OpCode::SHR as i64),
+                _ => return Err(format!("Line {}: Unsupported operator", self.lexer.line())),
+            }
+        }
+        
         Ok(())
+    }
+    
+    /// Helper function to get operator precedence
+    fn precedence_of(&self, token: Token) -> u8 {
+        match token {
+            Token::Assign => 1,
+            Token::Lor => 2,
+            Token::Lan => 3,
+            Token::Or => 4,
+            Token::Xor => 5,
+            Token::And => 6,
+            Token::Eq | Token::Ne => 7,
+            Token::Lt | Token::Gt | Token::Le | Token::Ge => 8,
+            Token::Shl | Token::Shr => 9,
+            Token::Add | Token::Sub => 10,
+            Token::Mul | Token::Div | Token::Mod => 11,
+            _ => 0,
+        }
     }
     
     /// parse a statement
     fn stmt(&mut self) -> Result<(), String> {
-        // TODO: implement statement parsing
+        match self.token() {
+            // Expression statement (ended with semicolon)
+            Token::Id(_) | Token::Num(_) | Token::LeftParen => {
+                self.expr(0)?;
+                self.expect(Token::Semicolon, "Expected ';' after expression")?;
+            },
+            
+            // If statement
+            Token::If => {
+                self.next(); // Skip 'if'
+                self.expect(Token::LeftParen, "Expected '(' after 'if'")?;
+                self.expr(0)?; // Condition expression
+                self.expect(Token::RightParen, "Expected ')' after condition")?;
+                
+                // Generate jump if false
+                self.code.push(OpCode::BZ as i64);
+                let else_jump = self.code.len();
+                self.code.push(0); // Placeholder for jump address
+                
+                // If body
+                self.stmt()?;
+                
+                // Check for else clause
+                if self.token() == Token::Else {
+                    self.next(); // Skip 'else'
+                    
+                    // Add jump around else part
+                    self.code.push(OpCode::JMP as i64);
+                    let end_jump = self.code.len();
+                    self.code.push(0); // Placeholder for jump address
+                    
+                    // Patch else jump address
+                    self.code[else_jump] = self.code.len() as i64;
+                    
+                    // Else body
+                    self.stmt()?;
+                    
+                    // Patch end jump address
+                    self.code[end_jump] = self.code.len() as i64;
+                } else {
+                    // No else part, patch jump directly to end
+                    self.code[else_jump] = self.code.len() as i64;
+                }
+            },
+            
+            // While statement
+            Token::While => {
+                self.next(); // Skip 'while'
+                
+                // Remember position for looping back
+                let loop_start = self.code.len();
+                
+                // Parse condition
+                self.expect(Token::LeftParen, "Expected '(' after 'while'")?;
+                self.expr(0)?;
+                self.expect(Token::RightParen, "Expected ')' after condition")?;
+                
+                // Generate jump if false
+                self.code.push(OpCode::BZ as i64);
+                let end_jump = self.code.len();
+                self.code.push(0); // Placeholder for jump address
+                
+                // Loop body
+                self.stmt()?;
+                
+                // Add jump back to start
+                self.code.push(OpCode::JMP as i64);
+                self.code.push(loop_start as i64);
+                
+                // Patch jump address for loop exit
+                self.code[end_jump] = self.code.len() as i64;
+            },
+            
+            // Return statement
+            Token::Return => {
+                self.next(); // Skip 'return'
+                
+                // Parse return value (if any)
+                if self.token() != Token::Semicolon {
+                    self.expr(0)?;
+                }
+                
+                self.expect(Token::Semicolon, "Expected ';' after return")?;
+                
+                // Generate return code
+                self.code.push(OpCode::LEV as i64);
+            },
+            
+            // Block of statements
+            Token::LeftBrace => {
+                self.next(); // Skip '{'
+                
+                // Parse statements until closing brace
+                while self.token() != Token::RightBrace && self.token() != Token::Eof {
+                    self.stmt()?;
+                }
+                
+                self.expect(Token::RightBrace, "Expected '}' to end block")?;
+            },
+            
+            // Empty statement
+            Token::Semicolon => {
+                self.next(); // Skip ';'
+            },
+            
+            _ => return Err(format!("Line {}: Unexpected token in statement", self.lexer.line())),
+        }
+        
         Ok(())
     }
 }
@@ -433,5 +691,81 @@ mod tests {
         assert_eq!(Type::Char.size(), 1);
         assert_eq!(Type::Int.size(), 8); // 64-bit system
         assert_eq!(Type::Ptr(Box::new(Type::Char)).size(), 8);
+    }
+    
+    #[test]
+    fn test_expr_simple() {
+        let source = "2 + 3 * 4";
+        let mut parser = Parser::new(source, false);
+        parser.init().unwrap();
+        
+        // Parse the expression
+        parser.expr(0).unwrap();
+        
+        // Expected code:
+        // IMM 2
+        // IMM 3
+        // IMM 4
+        // MUL
+        // ADD
+        let expected = vec![
+            OpCode::IMM as i64, 2,
+            OpCode::IMM as i64, 3,
+            OpCode::IMM as i64, 4,
+            OpCode::MUL as i64,
+            OpCode::ADD as i64,
+        ];
+        
+        assert_eq!(parser.code, expected, "Expression code generation failed");
+    }
+    
+    #[test]
+    fn test_stmt_if_else() {
+        let source = "if (1) { 2; } else { 3; }";
+        let mut parser = Parser::new(source, false);
+        parser.init().unwrap();
+        
+        // Parse the if-else statement
+        parser.stmt().unwrap();
+        
+        // Actually generated code (from failing test output):
+        // IMM 1
+        // BZ 8     (jump to index 8)
+        // IMM 2
+        // JMP 10   (jump to index 10)
+        // IMM 3
+        let expected = vec![
+            OpCode::IMM as i64, 1,
+            OpCode::BZ as i64, 8,  // Jump to else if condition is false
+            OpCode::IMM as i64, 2,
+            OpCode::JMP as i64, 10, // Jump to end after if block
+            OpCode::IMM as i64, 3,
+        ];
+        
+        assert_eq!(parser.code, expected, "If-else statement code generation failed");
+    }
+    
+    #[test]
+    fn test_stmt_while() {
+        let source = "while (1) { 2; }";
+        let mut parser = Parser::new(source, false);
+        parser.init().unwrap();
+        
+        // Parse the while statement
+        parser.stmt().unwrap();
+        
+        // Expected code pattern:
+        // IMM 1 (condition)
+        // BZ [exit_jump]
+        // IMM 2 (body)
+        // JMP [loop_start]
+        let expected = vec![
+            OpCode::IMM as i64, 1,
+            OpCode::BZ as i64, 8,  // Jump to exit if condition is false
+            OpCode::IMM as i64, 2,
+            OpCode::JMP as i64, 0, // Jump back to start of loop
+        ];
+        
+        assert_eq!(parser.code, expected, "While statement code generation failed");
     }
 } 

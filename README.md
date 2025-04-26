@@ -90,10 +90,13 @@ cargo test -- --nocapture
 - [x] Project structure set up
 - [x] Command-line argument handling
 - [x] Basic data structures defined
-- [ ] Lexer implementation
+- [ ] Lexer implementation (in progress)
 - [x] Symbol table implementation
 - [x] Type system basic implementation
-- [ ] Parser implementation (in progress)
-- [ ] VM implementation
+- [x] Expression parsing with precedence climbing
+- [x] Statement parsing (if-else, while, blocks)
+- [ ] Function parameter parsing
+- [ ] Local variable handling
+- [ ] VM implementation (in progress)
 - [ ] Self-compilation support
 
