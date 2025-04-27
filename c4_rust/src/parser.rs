@@ -641,13 +641,45 @@ impl<'a> Parser<'a> {
     
     /// parse an expression with a given precedence level
     fn expr(&mut self, precedence: u8) -> Result<(), String> {
-        // Handle numeric literals, variables, and function calls
+        // Handle numeric literals, variables, functions, and unary operations
         match self.token() {
             Token::Num(val) => {
                 // Push immediate value to code
                 self.code.push(OpCode::IMM as i64);
                 self.code.push(val);
                 self.next();
+                self.current_type = Type::Int;
+            },
+            Token::Str(_) => {
+                // Handle string literals
+                // TODO: Implement string handling
+                return Err(format!("Line {}: String literals not yet implemented", self.lexer.line()));
+            },
+            Token::Sizeof => {
+                self.next();
+                self.expect(Token::LeftParen, "Expected '(' after sizeof")?;
+                
+                // Parse the type
+                let mut typ = Type::Int;
+                if self.token() == Token::Int {
+                    self.next();
+                } else if self.token() == Token::Char {
+                    self.next();
+                    typ = Type::Char;
+                }
+                
+                // Handle pointer types
+                while self.token() == Token::Mul {
+                    self.next();
+                    typ = Type::Ptr(Box::new(typ));
+                }
+                
+                self.expect(Token::RightParen, "Expected ')' after type in sizeof")?;
+                
+                // Push the size of the type
+                self.code.push(OpCode::IMM as i64);
+                self.code.push(typ.size() as i64);
+                self.current_type = Type::Int;
             },
             Token::Id(id) => {
                 let name = self.get_id_name(id);
@@ -675,23 +707,35 @@ impl<'a> Parser<'a> {
                     
                     self.expect(Token::RightParen, "Expected ')' after function arguments")?;
                     
-                    // Find the function in symbol table
+                    // Find the function in symbol table - need to get necessary properties before code generation
+                    let sym_class;
+                    let sym_value;
+                    let sym_type;
+                    
                     if let Some(symbol) = self.find_symbol(&name) {
-                        if symbol.class == SymbolClass::Sys {
-                            // System call
-                            let sys_id = symbol.value; // Store the value before pushing
-                            self.code.push(sys_id); // Push system call ID
-                        } else if symbol.class == SymbolClass::Fun {
-                            // User-defined function
-                            let fn_addr = symbol.value; // Store the value before pushing
-                            self.code.push(OpCode::JSR as i64);
-                            self.code.push(fn_addr); // Push function address
-                        } else {
-                            return Err(format!("Line {}: '{}' is not a function", self.lexer.line(), name));
-                        }
+                        sym_class = symbol.class;
+                        sym_value = symbol.value;
+                        sym_type = symbol.typ.clone();
                     } else {
                         return Err(format!("Line {}: Unknown function '{}'", self.lexer.line(), name));
                     }
+                    
+                    // Generate code based on the symbol properties we retrieved
+                    match sym_class {
+                        SymbolClass::Sys => {
+                            // System call
+                            self.code.push(sym_value); // Push system call ID
+                        },
+                        SymbolClass::Fun => {
+                            // User-defined function
+                            self.code.push(OpCode::JSR as i64);
+                            self.code.push(sym_value); // Push function address
+                        },
+                        _ => return Err(format!("Line {}: '{}' is not a function", self.lexer.line(), name)),
+                    }
+                    
+                    // Update current type
+                    self.current_type = sym_type;
                     
                     // Clean up stack if there were arguments
                     if arg_count > 0 {
@@ -699,7 +743,7 @@ impl<'a> Parser<'a> {
                         self.code.push(arg_count);
                     }
                 } else {
-                    // Variable access
+                    // Variable access - get properties before generating code
                     if let Some(symbol) = self.find_symbol(&name) {
                         let sym_class = symbol.class;
                         let sym_value = symbol.value;
@@ -710,6 +754,7 @@ impl<'a> Parser<'a> {
                                 // Numeric constant
                                 self.code.push(OpCode::IMM as i64);
                                 self.code.push(sym_value);
+                                self.current_type = Type::Int;
                             },
                             SymbolClass::Glo => {
                                 // Global variable - push address
@@ -722,6 +767,7 @@ impl<'a> Parser<'a> {
                                 } else {
                                     self.code.push(OpCode::LI as i64);
                                 }
+                                self.current_type = sym_type;
                             },
                             SymbolClass::Loc => {
                                 // Local variable - calculate address from bp
@@ -734,6 +780,7 @@ impl<'a> Parser<'a> {
                                 } else {
                                     self.code.push(OpCode::LI as i64);
                                 }
+                                self.current_type = sym_type;
                             },
                             _ => return Err(format!("Line {}: Invalid variable '{}'", self.lexer.line(), name)),
                         }
@@ -742,19 +789,176 @@ impl<'a> Parser<'a> {
                     }
                 }
             },
+            Token::Mul => {
+                // Dereferencing operator
+                self.next();
+                self.expr(11)?; // 11 is the precedence of Inc/Dec
+                
+                // Check if we're dereferencing a pointer
+                if let Type::Ptr(base_type) = &self.current_type {
+                    self.current_type = (**base_type).clone();
+                } else {
+                    return Err(format!("Line {}: Cannot dereference a non-pointer type", self.lexer.line()));
+                }
+                
+                // Generate code to load the value at the address
+                if self.current_type == Type::Char {
+                    self.code.push(OpCode::LC as i64);
+                } else {
+                    self.code.push(OpCode::LI as i64);
+                }
+            },
+            Token::And => {
+                // Address-of operator
+                self.next();
+                self.expr(11)?; // 11 is the precedence of Inc/Dec
+                
+                // Check if we're trying to get address of a loaded value
+                let code_len = self.code.len();
+                if code_len >= 1 {
+                    let last_instr = self.code[code_len - 1] as usize;
+                    if last_instr == OpCode::LC as usize || last_instr == OpCode::LI as usize {
+                        // Pop the load instruction to just keep the address
+                        self.code.pop();
+                        // Update the type to a pointer to the current type
+                        self.current_type = Type::Ptr(Box::new(self.current_type.clone()));
+                    } else {
+                        return Err(format!("Line {}: Invalid address-of operation", self.lexer.line()));
+                    }
+                } else {
+                    return Err(format!("Line {}: Invalid address-of operation", self.lexer.line()));
+                }
+            },
+            Token::Add => {
+                // Unary plus - doesn't change value
+                self.next();
+                self.expr(11)?;
+                // Type remains the same
+            },
+            Token::Sub => {
+                // Unary minus - negate value
+                self.next();
+                
+                // Check if we have a constant number
+                if self.token() == Token::Num(self.lexer.value()) {
+                    // Negate the constant
+                    let val = -self.lexer.value();
+                    self.code.push(OpCode::IMM as i64);
+                    self.code.push(val);
+                    self.next();
+                } else {
+                    // Generate code for -expr
+                    self.code.push(OpCode::IMM as i64);
+                    self.code.push(-1);
+                    self.code.push(OpCode::PSH as i64);
+                    self.expr(11)?;
+                    self.code.push(OpCode::MUL as i64);
+                }
+                self.current_type = Type::Int;
+            },
+            Token::Inc | Token::Dec => {
+                // Pre-increment/decrement
+                let op = self.token();
+                self.next();
+                self.expr(11)?;
+                
+                // Ensure we have a valid LValue
+                let code_len = self.code.len();
+                if code_len >= 1 {
+                    let last_instr = self.code[code_len - 1] as usize;
+                    if last_instr == OpCode::LC as usize || last_instr == OpCode::LI as usize {
+                        // Replace last instruction with a push of the address
+                        self.code[code_len - 1] = OpCode::PSH as i64;
+                        
+                        // Re-load the value after we push the address
+                        if last_instr == OpCode::LC as usize {
+                            self.code.push(OpCode::LC as i64);
+                        } else {
+                            self.code.push(OpCode::LI as i64);
+                        }
+                        
+                        // Push the value
+                        self.code.push(OpCode::PSH as i64);
+                        
+                        // Push the increment size
+                        self.code.push(OpCode::IMM as i64);
+                        if self.current_type.is_ptr() {
+                            // For pointers, increment by the size of the base type
+                            if let Some(base_type) = self.current_type.base_type() {
+                                self.code.push(base_type.size() as i64);
+                            } else {
+                                return Err(format!("Line {}: Invalid pointer type", self.lexer.line()));
+                            }
+                        } else {
+                            // For scalars, increment by 1
+                            self.code.push(1);
+                        }
+                        
+                        // Add or subtract
+                        if op == Token::Inc {
+                            self.code.push(OpCode::ADD as i64);
+                        } else {
+                            self.code.push(OpCode::SUB as i64);
+                        }
+                        
+                        // Store back
+                        if last_instr == OpCode::LC as usize {
+                            self.code.push(OpCode::SC as i64);
+                        } else {
+                            self.code.push(OpCode::SI as i64);
+                        }
+                    } else {
+                        return Err(format!("Line {}: Invalid LValue in pre-increment/decrement", self.lexer.line()));
+                    }
+                } else {
+                    return Err(format!("Line {}: Invalid LValue in pre-increment/decrement", self.lexer.line()));
+                }
+            },
+            Token::LeftParen => {
+                self.next();
+                
+                // Type casting
+                if self.token() == Token::Int || self.token() == Token::Char {
+                    let mut typ = if self.token() == Token::Int { 
+                        Type::Int 
+                    } else { 
+                        Type::Char 
+                    };
+                    self.next();
+                    
+                    // Handle pointer types
+                    while self.token() == Token::Mul {
+                        self.next();
+                        typ = Type::Ptr(Box::new(typ));
+                    }
+                    
+                    self.expect(Token::RightParen, "Expected ')' after type cast")?;
+                    
+                    // Parse the expression being cast
+                    self.expr(11)?;
+                    
+                    // Update the current type to the cast type
+                    self.current_type = typ;
+                } else {
+                    // Regular parenthesized expression
+                    self.expr(0)?;
+                    self.expect(Token::RightParen, "Expected ')' after expression")?;
+                }
+            },
             _ => return Err(format!("Line {}: Expected expression", self.lexer.line())),
         }
         
         // Handle operators with precedence climbing
         while self.precedence_of(self.token()) > precedence {
             let op = self.token();
+            let op_type = self.current_type.clone(); // Save the LHS type for pointer arithmetic
             self.next();
             
             // Handle assignment specially
             if op == Token::Assign {
                 // For assignment, we need the LHS to be a loadable location
                 // Check if the last generated code is appropriate
-                if self.code.len() >= 3 {
+                if self.code.len() >= 1 {
                     let len = self.code.len();
                     let last_code = self.code[len-1] as usize;
                     
@@ -781,26 +985,203 @@ impl<'a> Parser<'a> {
             }
             
             // For other operators, parse the right side of the expression
-            self.expr(self.precedence_of(op))?;
+            self.code.push(OpCode::PSH as i64); // Push LHS
             
-            // Generate code for the operator
+            // Special handling for binary operators with pointers
             match op {
-                Token::Add => self.code.push(OpCode::ADD as i64),
-                Token::Sub => self.code.push(OpCode::SUB as i64),
-                Token::Mul => self.code.push(OpCode::MUL as i64),
-                Token::Div => self.code.push(OpCode::DIV as i64),
-                Token::Mod => self.code.push(OpCode::MOD as i64),
-                Token::Eq => self.code.push(OpCode::EQ as i64),
-                Token::Ne => self.code.push(OpCode::NE as i64),
-                Token::Lt => self.code.push(OpCode::LT as i64),
-                Token::Gt => self.code.push(OpCode::GT as i64),
-                Token::Le => self.code.push(OpCode::LE as i64),
-                Token::Ge => self.code.push(OpCode::GE as i64),
-                Token::And => self.code.push(OpCode::AND as i64),
-                Token::Or => self.code.push(OpCode::OR as i64),
-                Token::Xor => self.code.push(OpCode::XOR as i64),
-                Token::Shl => self.code.push(OpCode::SHL as i64),
-                Token::Shr => self.code.push(OpCode::SHR as i64),
+                Token::Add => {
+                    self.expr(self.precedence_of(op))?;
+                    
+                    // If LHS is a pointer, adjust RHS by pointer's base size
+                    if op_type.is_ptr() {
+                        self.code.push(OpCode::PSH as i64);
+                        self.code.push(OpCode::IMM as i64);
+                        
+                        if let Some(base_type) = op_type.base_type() {
+                            self.code.push(base_type.size() as i64);
+                        } else {
+                            return Err(format!("Line {}: Invalid pointer type in addition", self.lexer.line()));
+                        }
+                        
+                        self.code.push(OpCode::MUL as i64);
+                    }
+                    
+                    self.code.push(OpCode::ADD as i64);
+                    self.current_type = op_type; // Result has the type of LHS
+                },
+                Token::Sub => {
+                    self.expr(self.precedence_of(op))?;
+                    
+                    // Three cases:
+                    // 1. ptr - ptr: results in how many elements between them (int)
+                    // 2. ptr - int: adjusted by element size
+                    // 3. int - int: regular subtraction
+
+                    if op_type.is_ptr() && self.current_type.is_ptr() {
+                        // Case 1: ptr - ptr
+                        let base_size = match op_type.base_type() {
+                            Some(base) => base.size() as i64,
+                            None => return Err(format!("Line {}: Invalid pointer type in subtraction", self.lexer.line())),
+                        };
+                        
+                        // Subtract pointers, then divide by element size to get element count
+                        self.code.push(OpCode::SUB as i64);
+                        self.code.push(OpCode::PSH as i64);
+                        self.code.push(OpCode::IMM as i64);
+                        self.code.push(base_size);
+                        self.code.push(OpCode::DIV as i64);
+                        self.current_type = Type::Int; // Result is an integer
+                    } else if op_type.is_ptr() {
+                        // Case 2: ptr - int
+                        self.code.push(OpCode::PSH as i64);
+                        self.code.push(OpCode::IMM as i64);
+                        
+                        if let Some(base_type) = op_type.base_type() {
+                            self.code.push(base_type.size() as i64);
+                        } else {
+                            return Err(format!("Line {}: Invalid pointer type in subtraction", self.lexer.line()));
+                        }
+                        
+                        self.code.push(OpCode::MUL as i64);
+                        self.code.push(OpCode::SUB as i64);
+                        self.current_type = op_type; // Result has the type of LHS
+                    } else {
+                        // Case 3: int - int
+                        self.code.push(OpCode::SUB as i64);
+                        self.current_type = Type::Int;
+                    }
+                },
+                // Handle array indexing
+                Token::LeftBracket => {
+                    self.expr(0)?; // Parse index
+                    self.expect(Token::RightBracket, "Expected ']' after array index")?;
+                    
+                    // Make sure LHS is a pointer type
+                    if !op_type.is_ptr() {
+                        return Err(format!("Line {}: Array indexing requires a pointer", self.lexer.line()));
+                    }
+                    
+                    // Scale the index by the size of the base type
+                    self.code.push(OpCode::PSH as i64);
+                    self.code.push(OpCode::IMM as i64);
+                    
+                    if let Some(base_type) = op_type.base_type() {
+                        self.code.push(base_type.size() as i64);
+                    } else {
+                        return Err(format!("Line {}: Invalid pointer type in array indexing", self.lexer.line()));
+                    }
+                    
+                    self.code.push(OpCode::MUL as i64);
+                    self.code.push(OpCode::ADD as i64);
+                    
+                    // Load the value at the calculated address
+                    if let Some(base_type) = op_type.base_type() {
+                        self.current_type = (*base_type).clone();
+                        
+                        if self.current_type == Type::Char {
+                            self.code.push(OpCode::LC as i64);
+                        } else {
+                            self.code.push(OpCode::LI as i64);
+                        }
+                    } else {
+                        return Err(format!("Line {}: Invalid pointer type in array indexing", self.lexer.line()));
+                    }
+                },
+                // For other operators, use standard code generation
+                Token::Mul => { self.expr(self.precedence_of(op))?; self.code.push(OpCode::MUL as i64); self.current_type = Type::Int; },
+                Token::Div => { self.expr(self.precedence_of(op))?; self.code.push(OpCode::DIV as i64); self.current_type = Type::Int; },
+                Token::Mod => { self.expr(self.precedence_of(op))?; self.code.push(OpCode::MOD as i64); self.current_type = Type::Int; },
+                Token::Eq => { self.expr(self.precedence_of(op))?; self.code.push(OpCode::EQ as i64); self.current_type = Type::Int; },
+                Token::Ne => { self.expr(self.precedence_of(op))?; self.code.push(OpCode::NE as i64); self.current_type = Type::Int; },
+                Token::Lt => { self.expr(self.precedence_of(op))?; self.code.push(OpCode::LT as i64); self.current_type = Type::Int; },
+                Token::Gt => { self.expr(self.precedence_of(op))?; self.code.push(OpCode::GT as i64); self.current_type = Type::Int; },
+                Token::Le => { self.expr(self.precedence_of(op))?; self.code.push(OpCode::LE as i64); self.current_type = Type::Int; },
+                Token::Ge => { self.expr(self.precedence_of(op))?; self.code.push(OpCode::GE as i64); self.current_type = Type::Int; },
+                Token::And => { self.expr(self.precedence_of(op))?; self.code.push(OpCode::AND as i64); self.current_type = Type::Int; },
+                Token::Or => { self.expr(self.precedence_of(op))?; self.code.push(OpCode::OR as i64); self.current_type = Type::Int; },
+                Token::Xor => { self.expr(self.precedence_of(op))?; self.code.push(OpCode::XOR as i64); self.current_type = Type::Int; },
+                Token::Shl => { self.expr(self.precedence_of(op))?; self.code.push(OpCode::SHL as i64); self.current_type = Type::Int; },
+                Token::Shr => { self.expr(self.precedence_of(op))?; self.code.push(OpCode::SHR as i64); self.current_type = Type::Int; },
+                Token::Inc | Token::Dec => {
+                    // Post-increment/decrement
+                    // Need to handle similarly to pre-increment/decrement
+                    // But value before incrementing is used
+                    let code_len = self.code.len();
+                    if code_len >= 1 {
+                        let last_instr = self.code[code_len - 1] as usize;
+                        if last_instr == OpCode::LC as usize || last_instr == OpCode::LI as usize {
+                            // Replace load with push of the address
+                            self.code[code_len - 1] = OpCode::PSH as i64;
+                            
+                            // Re-load the value
+                            if last_instr == OpCode::LC as usize {
+                                self.code.push(OpCode::LC as i64);
+                            } else {
+                                self.code.push(OpCode::LI as i64);
+                            }
+                            
+                            // Save original value to stack
+                            self.code.push(OpCode::PSH as i64);
+                            
+                            // Duplicate the address for later use
+                            self.code.push(OpCode::PSH as i64);
+                            self.code.push(OpCode::IMM as i64);
+                            
+                            // Determine increment size
+                            if op_type.is_ptr() {
+                                if let Some(base_type) = op_type.base_type() {
+                                    self.code.push(base_type.size() as i64);
+                                } else {
+                                    return Err(format!("Line {}: Invalid pointer type", self.lexer.line()));
+                                }
+                            } else {
+                                self.code.push(1);
+                            }
+                            
+                            // Add or subtract
+                            if op == Token::Inc {
+                                self.code.push(OpCode::ADD as i64);
+                            } else {
+                                self.code.push(OpCode::SUB as i64);
+                            }
+                            
+                            // Store the incremented value
+                            if last_instr == OpCode::LC as usize {
+                                self.code.push(OpCode::SC as i64);
+                            } else {
+                                self.code.push(OpCode::SI as i64);
+                            }
+                            
+                            // Original value is still on the stack
+                            self.code.push(OpCode::PSH as i64);
+                            self.code.push(OpCode::IMM as i64);
+                            
+                            // For subtracting from the original value to get the original back (if needed)
+                            if op_type.is_ptr() {
+                                if let Some(base_type) = op_type.base_type() {
+                                    self.code.push(base_type.size() as i64);
+                                } else {
+                                    return Err(format!("Line {}: Invalid pointer type", self.lexer.line()));
+                                }
+                            } else {
+                                self.code.push(1);
+                            }
+                            
+                            // Undo the increment/decrement for the returned value
+                            if op == Token::Inc {
+                                self.code.push(OpCode::SUB as i64);
+                            } else {
+                                self.code.push(OpCode::ADD as i64);
+                            }
+                            
+                            // Current type remains unchanged
+                        } else {
+                            return Err(format!("Line {}: Invalid LValue in post-increment/decrement", self.lexer.line()));
+                        }
+                    } else {
+                        return Err(format!("Line {}: Invalid LValue in post-increment/decrement", self.lexer.line()));
+                    }
+                },
                 _ => return Err(format!("Line {}: Unsupported operator", self.lexer.line())),
             }
         }
@@ -1041,15 +1422,19 @@ mod tests {
         // Parse the expression
         parser.expr(0).unwrap();
         
-        // Expected code:
+        // Expected code with our new implementation:
         // IMM 2
+        // PSH     // Push LHS before operator
         // IMM 3
+        // PSH     // Push LHS before operator
         // IMM 4
         // MUL
         // ADD
         let expected = vec![
             OpCode::IMM as i64, 2,
+            OpCode::PSH as i64,
             OpCode::IMM as i64, 3,
+            OpCode::PSH as i64,
             OpCode::IMM as i64, 4,
             OpCode::MUL as i64,
             OpCode::ADD as i64,
