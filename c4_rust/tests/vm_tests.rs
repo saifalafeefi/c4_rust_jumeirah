@@ -93,4 +93,36 @@ fn test_vm_function_call() {
     let result = vm.run();
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), 12);
+}
+
+#[test]
+fn test_vm_printf() {
+    // Data segment with a sample string to print
+    let mut data = vec![0u8; 256];
+    
+    // Set up a test string in data: "Hello, %d!\n"
+    let str_addr = 10;
+    let test_string = "Hello, %d!\n";
+    for (i, byte) in test_string.bytes().enumerate() {
+        data[str_addr + i] = byte;
+    }
+    
+    // program: printf("Hello, %d!\n", 42);
+    let code = vec![
+        OpCode::IMM as i64, 42,     // argument: 42
+        OpCode::PSH as i64,         // push argument
+        OpCode::IMM as i64, str_addr as i64, // address of format string
+        OpCode::PSH as i64,         // push format string address
+        OpCode::PRTF as i64, 2,     // printf with 2 arguments (format + 1 parameter)
+        OpCode::IMM as i64, 0,      // return value
+        OpCode::PSH as i64,
+        OpCode::EXIT as i64,
+    ];
+    
+    let mut vm = VM::new(code, data, false);
+    let result = vm.run();
+    
+    // We can't easily capture stdout in this test,
+    // but we can check that printf returned successfully
+    assert!(result.is_ok());
 } 

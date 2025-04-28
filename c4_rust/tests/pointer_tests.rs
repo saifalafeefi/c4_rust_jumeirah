@@ -30,7 +30,6 @@ fn test_address_of_operator() {
 
 #[test]
 fn test_pointer_arithmetic() {
-    let source = "int main() { int x[2]; int *p; p = x; p = p + 1; return 0; }";
     let source = "int main() { int x; int *p; p = &x; p = p + 1; return 0; }";
     let mut parser = Parser::new(source, false);
     parser.init().unwrap();

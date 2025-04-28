@@ -70,7 +70,7 @@ pub struct Parser<'a> {
     data: Vec<u8>,
     current_type: Type,
     locals: usize,
-    src: bool, // source printing flag
+    _src: bool, // source printing flag (renamed with underscore to indicate unused)
 }
 
 impl<'a> Parser<'a> {
@@ -83,7 +83,7 @@ impl<'a> Parser<'a> {
             data: Vec::new(),
             current_type: Type::Int,
             locals: 0,
-            src,
+            _src: src,
         }
     }
     
@@ -361,13 +361,13 @@ impl<'a> Parser<'a> {
         if self.token() != Token::RightParen {
             loop {
                 // Parse parameter type
-                let mut param_type = Type::Int; // default to int
+                let mut _param_type = Type::Int; // default to int
                 
                 if self.token() == Token::Int {
-                    param_type = Type::Int;
+                    _param_type = Type::Int;
                     self.next();
                 } else if self.token() == Token::Char {
-                    param_type = Type::Char;
+                    _param_type = Type::Char;
                     self.next();
                 } else {
                     return Err(format!("Line {}: Parameter type expected", self.lexer.line()));
@@ -376,7 +376,7 @@ impl<'a> Parser<'a> {
                 // Parse pointer levels
                 while self.token() == Token::Mul {
                     self.next();
-                    param_type = Type::Ptr(Box::new(param_type));
+                    _param_type = Type::Ptr(Box::new(_param_type));
                 }
                 
                 // Parse parameter name
@@ -398,7 +398,7 @@ impl<'a> Parser<'a> {
                         self.add_symbol_with_history(
                             &param_name,
                             SymbolClass::Loc,
-                            param_type,
+                            _param_type,
                             param_count,
                             Some(old_class),
                             Some(old_type),
@@ -409,7 +409,7 @@ impl<'a> Parser<'a> {
                         self.add_symbol(
                             &param_name,
                             SymbolClass::Loc,
-                            param_type,
+                            _param_type,
                             param_count,
                         )?;
                     }
@@ -1391,7 +1391,7 @@ impl<'a> Parser<'a> {
                 self.next(); // Skip '{'
                 
                 // Remember old locals count for scope handling
-                let old_locals = self.locals;
+                let _old_locals = self.locals;
                 
                 // Parse statements until closing brace
                 while self.token() != Token::RightBrace && self.token() != Token::Eof {
