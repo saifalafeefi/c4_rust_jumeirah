@@ -23,6 +23,7 @@ The project is organized into several key components:
 - Supports self-compilation (can compile its original C code)
 - Uses a virtual machine to execute the compiled code
 - Preserves the minimal design of C4 while using Rust idioms
+- Includes robust error handling and bounds checking for stack safety
 
 ## Building
 
@@ -85,19 +86,6 @@ cargo test test_lexer_basic_tokens
 cargo test -- --nocapture
 ```
 
-## Pointer Support
-
-This implementation fully supports C-style pointer operations:
-
-- Dereferencing with the `*` operator
-- Address-of with the `&` operator
-- Pointer arithmetic (addition/subtraction with proper type scaling)
-- Multiple levels of pointers (e.g., `int **pp`)
-- Type checking for pointer operations
-- Increment/decrement operators for pointer values
-
-The implementation validates pointer types during compilation and generates the appropriate VM instructions for memory access and pointer arithmetic.
-
 ## Current Implementation Status
 
 - [x] Project structure set up
@@ -111,8 +99,8 @@ The implementation validates pointer types during compilation and generates the 
 - [x] Function parameter parsing
 - [x] Local variable handling
 - [x] Pointer operations and dereferencing
-- [ ] Array declarations support
-- [ ] Type casting implementation
-- [ ] VM implementation (in progress)
-- [ ] Self-compilation support
+- [x] VM implementation with stack-based architecture
+- [x] Self-compilation support
+- [x] Type casting implementation
+- [x] System call implementation (printf, etc.)
 

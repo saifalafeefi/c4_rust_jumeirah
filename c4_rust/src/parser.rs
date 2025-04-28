@@ -90,15 +90,16 @@ impl<'a> Parser<'a> {
     /// initialize the parser with keywords and system calls
     pub fn init(&mut self) -> Result<(), String> {
         // Add keywords to symbol table
-        self.add_keyword("char", 128 + 6)?;  // Token::Char
-        self.add_keyword("else", 128 + 7)?;  // Token::Else
-        self.add_keyword("enum", 128 + 8)?;  // Token::Enum
-        self.add_keyword("if", 128 + 9)?;    // Token::If
-        self.add_keyword("int", 128 + 10)?;  // Token::Int
-        self.add_keyword("return", 128 + 11)?; // Token::Return
-        self.add_keyword("sizeof", 128 + 12)?; // Token::Sizeof
-        self.add_keyword("while", 128 + 13)?;  // Token::While
-        self.add_keyword("void", 128 + 18)?;   // Token::Void
+        self.add_keyword("char", 134)?;  // Token::Char
+        self.add_keyword("else", 135)?;  // Token::Else
+        self.add_keyword("enum", 136)?;  // Token::Enum
+        self.add_keyword("for", 137)?;   // Token::For
+        self.add_keyword("if", 138)?;    // Token::If
+        self.add_keyword("int", 139)?;   // Token::Int
+        self.add_keyword("return", 140)?; // Token::Return
+        self.add_keyword("sizeof", 141)?; // Token::Sizeof
+        self.add_keyword("while", 142)?;  // Token::While
+        self.add_keyword("void", 146)?;   // Token::Void
         
         // Add system calls
         self.add_syscall("open", OpCode::OPEN as i64)?;
@@ -617,6 +618,9 @@ impl<'a> Parser<'a> {
             return "process".to_string();
         } else if id == 8426756478 || id == 210945 {
             return "complex".to_string();
+        // Standard library functions
+        } else if id == 495450526609734 || id == 24357699 {
+            return "printf".to_string();
         } else if id == 97 || id == 193499849 {  // 'a'
             return "a".to_string();
         } else if id == 98 || id == 193499950 {  // 'b' 
@@ -650,10 +654,38 @@ impl<'a> Parser<'a> {
                 self.next();
                 self.current_type = Type::Int;
             },
-            Token::Str(_) => {
+            Token::Str(str_index) => {
                 // Handle string literals
-                // TODO: Implement string handling
-                return Err(format!("Line {}: String literals not yet implemented", self.lexer.line()));
+                // Store the string in the data segment
+                let str_data = self.lexer.string_buffer();
+                let str_start = self.data.len();
+                
+                // Copy the string data into the data segment
+                let mut i = str_index;
+                while i < str_data.len() && str_data[i] != 0 {
+                    self.data.push(str_data[i]);
+                    i += 1;
+                }
+                // Add null terminator
+                self.data.push(0);
+                
+                // Align data segment to int boundary
+                while self.data.len() % std::mem::size_of::<i64>() != 0 {
+                    self.data.push(0);
+                }
+                
+                // Push immediate value (address of the string in data segment)
+                self.code.push(OpCode::IMM as i64);
+                self.code.push(str_start as i64);
+                self.next();
+                
+                // Handle multiple consecutive string literals (C concatenation feature)
+                while let Token::Str(_idx) = self.token() {
+                    // Just consume these tokens, they were already concatenated by the lexer
+                    self.next();
+                }
+                
+                self.current_type = Type::Ptr(Box::new(Type::Char));
             },
             Token::Sizeof => {
                 self.next();
@@ -1248,6 +1280,70 @@ impl<'a> Parser<'a> {
                 }
             },
             
+            // For statement - add support for C-style for loops
+            Token::For => {
+                self.next(); // Skip 'for'
+                self.expect(Token::LeftParen, "Expected '(' after 'for'")?;
+                
+                // Parse initialization (can be expression or empty)
+                if self.token() != Token::Semicolon {
+                    self.expr(0)?;
+                }
+                self.expect(Token::Semicolon, "Expected ';' after for initialization")?;
+                
+                // Store the position for condition check
+                let cond_pos = self.code.len();
+                
+                // Parse condition (can be empty, in which case it's treated as always true)
+                if self.token() != Token::Semicolon {
+                    self.expr(0)?;
+                } else {
+                    // No condition means always true (1)
+                    self.code.push(OpCode::IMM as i64);
+                    self.code.push(1);
+                }
+                self.expect(Token::Semicolon, "Expected ';' after for condition")?;
+                
+                // Emit branch if zero
+                self.code.push(OpCode::BZ as i64);
+                let exit_branch_pos = self.code.len();
+                self.code.push(0); // Placeholder for branch target
+                
+                // Jump to loop body (skip increment part for now)
+                self.code.push(OpCode::JMP as i64);
+                let body_jump_pos = self.code.len();
+                self.code.push(0); // Placeholder for body start
+                
+                // Store the position for the increment expression
+                let inc_pos = self.code.len();
+                
+                // Parse increment expression (can be empty)
+                if self.token() != Token::RightParen {
+                    self.expr(0)?;
+                }
+                
+                // Jump back to condition
+                self.code.push(OpCode::JMP as i64);
+                self.code.push(cond_pos as i64);
+                
+                self.expect(Token::RightParen, "Expected ')' after for increment")?;
+                
+                // Body starts here
+                let body_pos = self.code.len();
+                self.code[body_jump_pos] = body_pos as i64;
+                
+                // Parse loop body
+                self.stmt()?;
+                
+                // Jump to increment part
+                self.code.push(OpCode::JMP as i64);
+                self.code.push(inc_pos as i64);
+                
+                // Update exit branch target to point after loop
+                let exit_pos = self.code.len();
+                self.code[exit_branch_pos] = exit_pos as i64;
+            },
+            
             // While statement
             Token::While => {
                 self.next(); // Skip 'while'
@@ -1458,6 +1554,7 @@ mod tests {
         // IMM 2
         // JMP 10   (jump to index 10)
         // IMM 3
+        // JMP 10   (jump to index 10)
         let expected = vec![
             OpCode::IMM as i64, 1,
             OpCode::BZ as i64, 8,  // Jump to else if condition is false
