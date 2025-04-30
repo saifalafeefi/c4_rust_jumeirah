@@ -661,31 +661,37 @@ impl<'a> Parser<'a> {
                 let str_start = self.data.len();
                 
                 // Copy the string data into the data segment
-                let mut i = str_index;
-                while i < str_data.len() && str_data[i] != 0 {
-                    self.data.push(str_data[i]);
-                    i += 1;
-                }
-                // Add null terminator
-                self.data.push(0);
-                
-                // Align data segment to int boundary
-                while self.data.len() % std::mem::size_of::<i64>() != 0 {
+                if str_index < str_data.len() {
+                    // Copy the string data into the data segment
+                    let mut i = str_index;
+                    while i < str_data.len() && str_data[i] != 0 {
+                        self.data.push(str_data[i]);
+                        i += 1;
+                    }
+                    // Add null terminator
                     self.data.push(0);
-                }
-                
-                // Push immediate value (address of the string in data segment)
-                self.code.push(OpCode::IMM as i64);
-                self.code.push(str_start as i64);
-                self.next();
-                
-                // Handle multiple consecutive string literals (C concatenation feature)
-                while let Token::Str(_idx) = self.token() {
-                    // Just consume these tokens, they were already concatenated by the lexer
+                    
+                    // Align data segment to int boundary
+                    while self.data.len() % std::mem::size_of::<i64>() != 0 {
+                        self.data.push(0);
+                    }
+                    
+                    // Push immediate value (address of the string in data segment)
+                    self.code.push(OpCode::IMM as i64);
+                    self.code.push(str_start as i64);
                     self.next();
+                    
+                    // Handle multiple consecutive string literals (C concatenation feature)
+                    while let Token::Str(_idx) = self.token() {
+                        // Just consume these tokens, they were already concatenated by the lexer
+                        self.next();
+                    }
+                    
+                    self.current_type = Type::Ptr(Box::new(Type::Char));
+                } else {
+                    return Err(format!("Line {}: Invalid string index {}, buffer len {}", 
+                                       self.lexer.line(), str_index, str_data.len()));
                 }
-                
-                self.current_type = Type::Ptr(Box::new(Type::Char));
             },
             Token::Sizeof => {
                 self.next();
@@ -757,6 +763,11 @@ impl<'a> Parser<'a> {
                         SymbolClass::Sys => {
                             // System call
                             self.code.push(sym_value); // Push system call ID
+                            
+                            // For printf (PRTF), we need to include the argument count
+                            if sym_value == OpCode::PRTF as i64 {
+                                self.code.push(arg_count);
+                            }
                         },
                         SymbolClass::Fun => {
                             // User-defined function

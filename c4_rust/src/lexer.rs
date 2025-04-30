@@ -250,6 +250,9 @@ impl<'a> Lexer<'a> {
                             }
                         }
                         
+                        // Ensure null termination
+                        self.string_buffer.push(0);
+                        
                         if string_delim == '"' {
                             // For string literals, return the index to the start of the string
                             self.current_value = start_pos as i64;

@@ -582,17 +582,9 @@ impl VM {
             println!("PRINTF: format string address: {}", format_addr);
         }
         
-        // Check format string address is valid and resize data if needed
+        // Extend data segment if needed to access the string
         if format_addr >= self.data.len() {
-            // If we're testing, allow automatic data segment expansion
-            let needed_size = format_addr + 1;
-            self.data.resize(needed_size, 0);
-            
-            // Clean up the stack
-            self.sp += argc;
-            
-            // Return 0 (empty string length)
-            return Ok(0);
+            self.data.resize(format_addr + 100, 0); // Give some extra space
         }
         
         // Read format string
