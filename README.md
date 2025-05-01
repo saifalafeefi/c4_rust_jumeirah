@@ -71,6 +71,18 @@ cargo run -- -d c4.c
 cargo run -- -s c4.c
 ```
 
+## Documentation
+
+Generate and view the documentation with:
+
+```bash
+# Generate documentation
+cargo doc --no-deps
+
+# Open documentation in browser
+cargo doc --no-deps --open
+```
+
 ## Testing
 
 To run the tests:
@@ -84,6 +96,9 @@ cargo test test_lexer_basic_tokens
 
 # Run tests with output
 cargo test -- --nocapture
+
+# Test self-hosting capability
+cargo test test_self_hosting_capabilities -- --nocapture
 
 # Use the PowerShell script to run all tests and sample programs
 .\run_tests.ps1
@@ -106,6 +121,8 @@ The Rust tests are organized into several modules:
 - `pointer_tests.rs`: Tests for pointer operations
 - `function_tests.rs`: Tests for function parsing and generation
 - `vm_tests.rs`: Tests for the virtual machine execution
+- `vm_memory_tests.rs`: Tests for VM memory functions (load_int, load_char, store_int, store_char)
+- `self_hosting_test.rs`: Tests that verify the compiler's ability to parse its own source code
 
 ## Recent Fixes and Improvements
 
@@ -116,6 +133,9 @@ The Rust tests are organized into several modules:
 - Fixed unused variable warnings
 - Enhanced code generation for pointers and function calls
 - Created a convenient testing script to verify all functionality
+- Added tests for VM memory functions to improve test coverage
+- Implemented self-hosting capability testing
+- Generated comprehensive code documentation
 
 ## Current Implementation Status
 
@@ -134,4 +154,6 @@ The Rust tests are organized into several modules:
 - [x] Self-compilation support
 - [x] Type casting implementation
 - [x] System call implementation (printf, etc.)
-- [x] Comprehensive test suite 
+- [x] Comprehensive test suite
+- [x] Code documentation
+- [x] Self-hosting verification testing 

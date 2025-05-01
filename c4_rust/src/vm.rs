@@ -469,7 +469,7 @@ impl VM {
     }
     
     /// load int from memory
-    fn load_int(&self, addr: usize) -> i64 {
+    pub fn load_int(&self, addr: usize) -> i64 {
         if self.debug {
             println!("  Loading int from addr {}, data len: {}", addr, self.data.len());
         }
@@ -506,7 +506,7 @@ impl VM {
     }
     
     /// load char from memory
-    fn load_char(&self, addr: usize) -> u8 {
+    pub fn load_char(&self, addr: usize) -> u8 {
         if addr < self.data.len() {
             self.data[addr]
         } else {
@@ -515,7 +515,7 @@ impl VM {
     }
     
     /// store int to memory
-    fn store_int(&mut self, addr: usize, val: i64) {
+    pub fn store_int(&mut self, addr: usize, val: i64) {
         if self.debug {
             println!("  Storing int value: {} at address: {}", val, addr);
         }
@@ -536,7 +536,7 @@ impl VM {
     }
     
     /// store char to memory
-    fn store_char(&mut self, addr: usize, val: u8) {
+    pub fn store_char(&mut self, addr: usize, val: u8) {
         if addr >= self.data.len() {
             // grow data segment if needed
             self.data.resize(addr + 1, 0);

@@ -1,9 +1,9 @@
 [package]
 name = "c4_rust"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
-authors = ["Your Team Name"]
-description = "A Rust implementation of the C4 compiler"
+authors = ["TEAM JUMEIRAH - KHALIFA UNIVERSITY"]
+description = "A Rust implementation of the C4 compiler by Saif Alafeefi and Zayed Alnuami"
 
 [dependencies]
 libc = "0.2" # For system calls like open, read, etc.
