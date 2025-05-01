@@ -1,0 +1,8 @@
+[package]
+name = "c4_rust"
+version = "0.1.0"
+edition = "2021"
+authors = ["Your Team <your.email@example.com>"]
+description = "A Rust implementation of the C4 compiler"
+
+[dependencies] 
