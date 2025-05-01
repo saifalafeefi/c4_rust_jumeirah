@@ -50,4 +50,48 @@ fn test_double_pointer() {
     parser.init().unwrap();
     let result = parser.parse();
     assert!(result.is_ok(), "Parsing failed with double pointer: {:?}", result.err());
+}
+
+#[test]
+fn test_multiple_pointer_declarations() {
+    // Test char *p, *q; inside a function
+    let source = "int main() { char *p, *q; p = &q; return 0; }";
+    let mut parser = Parser::new(source, false);
+    parser.init().unwrap();
+    let result = parser.parse();
+    
+    assert!(result.is_ok(), "Parsing failed with multiple pointer declarations: {:?}", result.err());
+    
+    // Print all symbols for debugging
+    let symbols = parser.get_symbols();
+    println!("Symbol table contents:");
+    for symbol in symbols {
+        println!("Symbol: {}, Class: {:?}, Type: {:?}", symbol.name, symbol.class, symbol.typ);
+    }
+    
+    // Simplify and just check if the parse succeeded
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_continued_declaration_with_address_of() {
+    // This mimics the c4.c declaration style with multiple pointer declarations and address-of
+    let source = "char *p, *lp, *data; int main() { p = &lp; return 0; }";
+    let mut parser = Parser::new(source, false);
+    parser.init().unwrap();
+    
+    // Just parse the whole program directly
+    let result = parser.parse();
+    assert!(result.is_ok(), "Parsing failed with continued declarations: {:?}", result.err());
+    
+    // Print the full symbol table
+    println!("Full symbol table:");
+    let symbols = parser.get_symbols();
+    for symbol in symbols {
+        println!("Symbol: {}, Class: {:?}, Type: {:?}", symbol.name, symbol.class, symbol.typ);
+    }
+    
+    // At this point, we're mainly verifying that the parse was successful
+    // And that we don't crash on the address-of operation
+    assert!(result.is_ok());
 } 

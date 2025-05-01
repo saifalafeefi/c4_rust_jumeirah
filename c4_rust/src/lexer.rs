@@ -432,6 +432,22 @@ impl<'a> Lexer<'a> {
     pub fn get_line_pos(&self) -> usize {
         self.lp
     }
+    
+    /// check if the source code contains a given string
+    pub fn source_contains(&self, text: &str) -> bool {
+        self.source.contains(text)
+    }
+    
+    /// peek at the next character in the source without consuming it
+    pub fn peek_next(&self) -> Option<char> {
+        // We can only peek on the iterator as it is, so we'll access the source directly
+        let current_pos = self.pos;
+        if current_pos < self.source.len() {
+            self.source[current_pos..].chars().next()
+        } else {
+            None
+        }
+    }
 }
 
 #[cfg(test)]

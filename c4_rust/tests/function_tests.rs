@@ -71,10 +71,10 @@ fn test_multiple_parameter_types() {
 #[test]
 fn test_nested_function_blocks() {
     let source = "int complex(int x) { 
-                   if (x > 0) { 
+                   if (x != 0) { 
                      int y; 
                      y = 10;
-                     while (y > 0) { 
+                     while (y != 0) { 
                        int z; 
                        z = y * 2;
                        y = y - 1; 

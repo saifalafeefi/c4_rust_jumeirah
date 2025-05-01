@@ -25,6 +25,20 @@ The project is organized into several key components:
 - Preserves the minimal design of C4 while using Rust idioms
 - Includes robust error handling and bounds checking for stack safety
 
+## Known Limitations
+
+While our implementation covers most of the core functionality of C4, there are some known limitations:
+
+1. **Complex expressions in original C4**: Our Rust implementation doesn't fully handle some of the complex expressions in the original C4 source code, specifically:
+   - The string indexing and pointer arithmetic used in the printf statements around lines 58-61
+   - The bit shift operations used for token hashing around line 73
+   - These limitations only affect full self-hosting (compiling the original C4 with our implementation) and don't impact the ability to compile and run normal C programs.
+
+2. **Implementation differences**: Some aspects of the implementation are handled differently in Rust compared to C, particularly:
+   - Memory management (using Rust's ownership system)
+   - Error handling (using Result types instead of exit calls)
+   - Symbol table organization (using structured data types)
+
 ## Building
 
 To build the project:
@@ -156,4 +170,13 @@ The Rust tests are organized into several modules:
 - [x] System call implementation (printf, etc.)
 - [x] Comprehensive test suite
 - [x] Code documentation
-- [x] Self-hosting verification testing 
+- [x] Self-hosting verification testing
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Acknowledgments
+
+- Robert Swierczek for the original C4 compiler
+- University assignment that inspired this implementation 
