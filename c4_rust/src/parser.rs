@@ -76,11 +76,26 @@ pub struct Parser<'a> {
 impl<'a> Parser<'a> {
     /// create a new parser
     pub fn new(source: &'a str, src: bool) -> Self {
+        let mut data = Vec::new();
+        
+        // Add a test string at the beginning of the data segment
+        // This ensures we have at least one valid string in the data segment
+        let test_str = "Hello world!\n";
+        for byte in test_str.bytes() {
+            data.push(byte);
+        }
+        data.push(0); // null terminator
+        
+        // Align to 8-byte boundary
+        while data.len() % 8 != 0 {
+            data.push(0);
+        }
+        
         Parser {
             lexer: Lexer::new(source),
             symbols: Vec::new(),
             code: Vec::new(),
-            data: Vec::new(),
+            data,
             current_type: Type::Int,
             locals: 0,
             _src: src,
@@ -532,13 +547,13 @@ impl<'a> Parser<'a> {
                         self.code.push(OpCode::LEA as i64);
                         self.code.push((self.locals - 1) as i64);
                         
-                        // Push the address to the stack
+                        // Step 1: Save variable address for later
                         self.code.push(OpCode::PSH as i64);
                         
-                        // Parse the initialization expression
+                        // Step 2: Evaluate the initializer
                         self.expr(0)?;
                         
-                        // Store the value to the local variable
+                        // Step 3: Store value at the address
                         if var_type == Type::Char {
                             self.code.push(OpCode::SC as i64);
                         } else {
@@ -744,6 +759,15 @@ impl<'a> Parser<'a> {
                 let str_data = self.lexer.string_buffer();
                 let str_start = self.data.len();
                 
+                // Debug output
+                println!("DEBUG: String literal at index {}, content: ", str_index);
+                for i in str_index..str_data.len() {
+                    if str_data[i] == 0 { break; }
+                    print!("{}", str_data[i] as char);
+                }
+                println!("");
+                println!("DEBUG: Storing string at data segment position: {}", str_start);
+                
                 // Copy the string data into the data segment
                 let mut i = str_index;
                 while i < str_data.len() && str_data[i] != 0 {
@@ -761,6 +785,7 @@ impl<'a> Parser<'a> {
                 // Push immediate value (address of the string in data segment)
                 self.code.push(OpCode::IMM as i64);
                 self.code.push(str_start as i64);
+                println!("DEBUG: Generated IMM {} for string address", str_start);
                 self.next();
                 
                 // Handle multiple consecutive string literals (C concatenation feature)
@@ -858,7 +883,22 @@ impl<'a> Parser<'a> {
                             
                             // If this is printf, also push the argument count
                             if name == "printf" {
+                                // Push argument count to code
                                 self.code.push(arg_count as i64);
+                                
+                                // For printf, we need to ensure the arguments are pushed correctly
+                                // String literals are already handled properly, but variables need special handling
+                                println!("DEBUG: Generating printf with {} arguments", arg_count);
+                                
+                                // Add special debug output for printf
+                                if arg_count > 0 {
+                                    let start_idx = self.code.len().saturating_sub(arg_count * 2);
+                                    for i in start_idx..self.code.len() {
+                                        if i < self.code.len() {
+                                            println!("DEBUG: Generated code at pos {}: {}", i, self.code[i]);
+                                        }
+                                    }
+                                }
                             }
                         },
                         SymbolClass::Fun => {
@@ -875,7 +915,7 @@ impl<'a> Parser<'a> {
                     // Clean up stack if there were arguments
                     if arg_count > 0 && name != "printf" { // Printf handles its own stack cleanup
                         self.code.push(OpCode::ADJ as i64);
-                        self.code.push(arg_count);
+                        self.code.push(arg_count as i64);
                     }
                 } else {
                     // Variable access - get properties before generating code
@@ -909,11 +949,17 @@ impl<'a> Parser<'a> {
                                 self.code.push(OpCode::LEA as i64);
                                 self.code.push(sym_value);
                                 
+                                // Debug output for locals
+                                println!("DEBUG PARSER: Local variable '{}' at offset {}, generating LEA {}", 
+                                         name, sym_value, sym_value);
+                                
                                 // Load value
                                 if sym_type == Type::Char {
                                     self.code.push(OpCode::LC as i64);
+                                    println!("DEBUG PARSER: Loading char value with LC");
                                 } else {
                                     self.code.push(OpCode::LI as i64);
+                                    println!("DEBUG PARSER: Loading int value with LI");
                                 }
                                 self.current_type = sym_type;
                             },
@@ -1183,14 +1229,20 @@ impl<'a> Parser<'a> {
                         // Remove the load instruction
                         self.code.pop();
                         
+                        println!("DEBUG PARSER: Assignment detected, removed load instruction");
+                        
                         // Evaluate the right side of the assignment
                         self.expr(0)?;
+                        
+                        println!("DEBUG PARSER: Finished RHS evaluation, generating store");
                         
                         // Generate a store instruction
                         if last_code == OpCode::LC as usize {
                             self.code.push(OpCode::SC as i64);
+                            println!("DEBUG PARSER: Generated SC for char store");
                         } else {
                             self.code.push(OpCode::SI as i64);
+                            println!("DEBUG PARSER: Generated SI for int store");
                         }
                         continue;
                     }

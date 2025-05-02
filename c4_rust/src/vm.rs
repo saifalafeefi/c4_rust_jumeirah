@@ -46,217 +46,185 @@ impl VM {
     
     /// runs until exit
     pub fn run(&mut self) -> Result<i64, String> {
-        // check stack space
-        if self.sp < 2 {
-            return Err("Insufficient stack space for initial frame".to_string());
-        }
+        // Set initial pc, sp, bp
+        self.pc = 0;
+        self.sp = self.stack.len() - 1;
+        self.bp = self.sp;
+        self.ax = 0;
+        self.cycle = 0;
         
-        // push return address
-        self.sp -= 1;
-        self.stack[self.sp] = OpCode::EXIT as i64;
-        
-        // TODO: Set up argc and argv for main
-        
-        // main loop
+        // Main execution loop
         while self.pc < self.code.len() {
-            let op = self.code[self.pc] as usize;
+            // Get opcode
+            let op = self.code[self.pc] as u8;
             self.pc += 1;
             self.cycle += 1;
             
-            // stop if looping forever
-            if self.cycle > 1_000_000 {
-                return Err("Execution halted: cycle limit exceeded (possible infinite recursion)".to_string());
-            }
-            
             if self.debug {
-                self.print_debug_info(op);
+                self.print_debug_info(op as usize);
             }
             
-            // check op validity
-            if op >= 39 { // 39 is the count of valid opcodes
-                return Err(format!("Invalid opcode: {}", op));
+            // Show stack state (for debugging)
+            if self.debug && op != OpCode::LEA as u8 && op != OpCode::LI as u8 && op != OpCode::SI as u8 {
+                // Dump first few stack entries to see variable values
+                println!("DEBUG VM: Stack state at instruction {}:", self.pc);
+                let end = 5.min(self.stack.len());
+                for i in 0..end {
+                    println!("  stack[{}] = {}", i, self.stack[i]);
+                }
             }
             
-            match op as u8 {
-                // load address
+            // Always show current memory location before each operation
+            if self.debug {
+                println!("DEBUG VM: Instruction {} at pc={}: {}", op, self.pc-1, self.op_to_string(op as usize));
+                
+                // Show AX value
+                println!("DEBUG VM: AX = {}", self.ax);
+                
+                // Show first few stack entries to track variable values
+                println!("DEBUG VM: First few stack entries:");
+                let vars_to_show = 10.min(self.stack.len());
+                for i in 0..vars_to_show {
+                    println!("  stack[{}] = {}", i, self.stack[i]);
+                }
+            }
+            
+            match op {
+                // LEA: Load effective address
                 op if op == OpCode::LEA as u8 => {
-                    // check next exists
-                    if self.pc >= self.code.len() {
-                        return Err(format!("Unexpected end of code after LEA at pc={}", self.pc - 1));
-                    }
+                    let offset = self.next_code() as usize;
                     
-                    let offset = self.next_code();
+                    // Calculate effective address for a local variable
+                    // For variables that are offsets from BP, we use BP - offset
+                    self.ax = offset as i64;
+                    
                     if self.debug {
-                        println!("  LEA: bp = {}, offset = {}, addr = {}", self.bp, offset, self.bp - offset as usize);
+                        println!("DEBUG VM: LEA - For local variable with offset {}, using address {}", 
+                                offset, self.ax);
                     }
-                    // locals at negative offset
-                    self.ax = (self.bp - offset as usize) as i64;
                 },
                 
-                // load immediate
+                // IMM: Load immediate value
                 op if op == OpCode::IMM as u8 => {
-                    // check next exists
-                    if self.pc >= self.code.len() {
-                        return Err(format!("Unexpected end of code after IMM at pc={}", self.pc - 1));
-                    }
-                    
                     self.ax = self.next_code();
+                    println!("DEBUG VM: IMM - Loaded immediate value {}", self.ax);
                 },
                 
-                // jump
+                // JMP: Jump
                 op if op == OpCode::JMP as u8 => {
-                    // check next exists
-                    if self.pc >= self.code.len() {
-                        return Err(format!("Unexpected end of code after JMP at pc={}", self.pc - 1));
-                    }
-                    
-                    let addr = self.next_code() as usize;
-                    
-                    // check valid address
-                    if addr >= self.code.len() {
-                        return Err(format!("Invalid jump address: {} (code length: {})", addr, self.code.len()));
-                    }
-                    
-                    self.pc = addr;
+                    self.pc = self.next_code() as usize;
                 },
                 
-                // call subroutine
+                // JSR: Jump to subroutine
                 op if op == OpCode::JSR as u8 => {
-                    let addr = self.next_code() as usize;
-                    
-                    // check stack room
-                    if self.sp < 1 {
+                    // Push return address
+                    if self.sp == 0 {
                         return Err("Stack overflow in JSR".to_string());
                     }
-                    
-                    // save return address
                     self.sp -= 1;
-                    self.stack[self.sp] = self.pc as i64;
+                    self.stack[self.sp] = self.pc as i64 + 1; // +1 to skip JSR argument
                     
-                    // jump to function
-                    self.pc = addr;
+                    // Jump to function entry
+                    self.pc = self.next_code() as usize;
                 },
                 
-                // branch if zero
+                // BZ: Branch if zero
                 op if op == OpCode::BZ as u8 => {
-                    let addr = self.next_code() as usize;
+                    let target = self.next_code() as usize;
                     if self.ax == 0 {
-                        self.pc = addr;
+                        self.pc = target;
                     }
                 },
                 
-                // branch if nonzero
+                // BNZ: Branch if not zero
                 op if op == OpCode::BNZ as u8 => {
-                    let addr = self.next_code() as usize;
+                    let target = self.next_code() as usize;
                     if self.ax != 0 {
-                        self.pc = addr;
+                        self.pc = target;
                     }
                 },
                 
-                // enter function
+                // ENT: Enter function
                 op if op == OpCode::ENT as u8 => {
-                    let frame_size = self.next_code() as usize;
+                    let local_size = self.next_code() as usize;
                     if self.debug {
-                        println!("  ENT: creating stack frame with {} local variables", frame_size);
+                        println!("  ENT: creating stack frame with {} local variables", local_size);
                     }
                     
-                    // check stack space
-                    if self.sp < frame_size + 1 {
-                        return Err(format!("Stack overflow in ENT: need {} slots but only {} available",
-                                         frame_size + 1, self.sp));
+                    // Push old base pointer
+                    if self.sp < 2 {
+                        return Err("Stack overflow in ENT".to_string());
                     }
-                    
-                    // save old bp
                     self.sp -= 1;
                     self.stack[self.sp] = self.bp as i64;
                     
-                    // set new bp
+                    // Set new base pointer
                     self.bp = self.sp;
                     
-                    // make space for locals
-                    if frame_size > 0 {
-                        self.sp -= frame_size;
-                        
-                        // zero local vars
-                        for i in 0..frame_size {
-                            if self.sp + i < self.stack.len() {
-                                self.stack[self.sp + i] = 0;
-                            }
-                        }
+                    // Reserve space for locals
+                    if self.sp < local_size + 1 {
+                        return Err(format!("Stack overflow for locals: need {} slots", local_size));
                     }
+                    self.sp -= local_size;
                 },
                 
-                // adjust stack
+                // ADJ: Adjust stack
                 op if op == OpCode::ADJ as u8 => {
-                    self.sp += self.next_code() as usize;
+                    let n = self.next_code() as usize;
+                    if self.sp + n > self.stack.len() {
+                        return Err(format!("Stack underflow in ADJ: sp={}, n={}", self.sp, n));
+                    }
+                    self.sp += n;
                 },
                 
-                // leave function
+                // LEV: Leave function
                 op if op == OpCode::LEV as u8 => {
-                    // check pointers first
-                    if self.bp >= self.stack.len() {
-                        return Err(format!("Invalid base pointer in LEV: bp={}, stack len={}", 
-                                          self.bp, self.stack.len()));
-                    }
-                    
-                    // restore sp to bp
+                    // Restore base pointer and stack pointer
                     self.sp = self.bp;
-                    
-                    // get old bp
-                    let prev_bp = self.stack[self.sp] as usize;
-                    
-                    // update bp and sp
-                    self.bp = prev_bp;
+                    if self.sp >= self.stack.len() {
+                        return Err(format!("Stack underflow in LEV: bp={}", self.bp));
+                    }
+                    self.bp = self.stack[self.sp] as usize;
                     self.sp += 1;
                     
-                    // check for return addr
-                    if self.sp >= self.stack.len() {
-                        // at end of stack
+                    // If there's no return address on the stack, we're returning from main
+                    if self.sp >= self.stack.len() || (self.sp == self.stack.len() - 1) {
+                        if self.debug {
+                            println!("  LEV: returning from main function with value {}", self.ax);
+                        }
                         return Ok(self.ax);
                     }
                     
-                    // get return addr
-                    let ret_addr = self.stack[self.sp] as usize;
-                    self.sp += 1;
-                    
-                    // jump back
-                    self.pc = ret_addr;
-                    
-                    // handle exit code
-                    if self.pc >= self.code.len() || 
-                       (self.pc < self.code.len() && self.code[self.pc] as u8 == OpCode::EXIT as u8) {
-                        if self.sp == 0 {
-                            return Err("Stack overflow in LEV before EXIT".to_string());
-                        }
-                        self.sp -= 1;
-                        self.stack[self.sp] = self.ax;
+                    // Otherwise, restore the program counter from the stack (return address)
+                    if self.sp >= self.stack.len() {
+                        return Err(format!("Stack underflow when restoring PC in LEV: sp={}", self.sp));
                     }
+                    self.pc = self.stack[self.sp] as usize;
+                    self.sp += 1;
                 },
                 
-                // load int
+                // LI: Load int
                 op if op == OpCode::LI as u8 => {
                     let addr = self.ax as usize;
-                    if self.debug {
-                        println!("  LI: loading from stack addr {}", addr);
-                    }
                     
-                    // check valid addr
+                    // Bounds check
                     if addr >= self.stack.len() {
-                        return Err(format!("Invalid memory access: tried to load from address {} but stack size is {}", addr, self.stack.len()));
+                        return Err(format!("Invalid memory access: tried to load from address {} but stack size is {}", 
+                                          addr, self.stack.len()));
                     }
                     
+                    // Load from the address
                     self.ax = self.stack[addr];
+                    
                     if self.debug {
-                        println!("  LI: loaded value {}", self.ax);
+                        println!("DEBUG VM: LI - Loaded value {} from address {}", self.ax, addr);
                     }
                 },
                 
                 // load char
                 op if op == OpCode::LC as u8 => {
                     let addr = self.ax as usize;
-                    if self.debug {
-                        println!("  LC: loading char from stack addr {}", addr);
-                    }
+                    println!("DEBUG VM: LC - Loading char from stack addr {}", addr);
                     
                     // check valid addr
                     if addr >= self.stack.len() {
@@ -264,30 +232,31 @@ impl VM {
                     }
                     
                     self.ax = (self.stack[addr] & 0xFF) as i64;
+                    println!("DEBUG VM: LC - Loaded char value {} from stack[{}]", self.ax, addr);
                 },
                 
-                // store int
+                // SI: Store int
                 op if op == OpCode::SI as u8 => {
                     let addr = self.stack[self.sp] as usize;
-                    if self.debug {
-                        println!("  SI: storing {} to stack addr {}", self.ax, addr);
-                    }
-                    
-                    // check valid addr
-                    if addr >= self.stack.len() {
-                        return Err(format!("Invalid memory access: tried to store at address {} but stack size is {}", addr, self.stack.len()));
-                    }
-                    
-                    self.stack[addr] = self.ax;
                     self.sp += 1;
+                    
+                    // Bounds check
+                    if addr >= self.stack.len() {
+                        return Err(format!("Invalid store: address {} out of range (stack size: {})", addr, self.stack.len()));
+                    }
+                    
+                    // Store the value
+                    self.stack[addr] = self.ax;
+                    
+                    if self.debug {
+                        println!("DEBUG VM: SI - Stored value {} to address {}", self.ax, addr);
+                    }
                 },
                 
                 // store char
                 op if op == OpCode::SC as u8 => {
                     let addr = self.stack[self.sp] as usize;
-                    if self.debug {
-                        println!("  SC: storing char {} to stack addr {}", self.ax & 0xFF, addr);
-                    }
+                    println!("DEBUG VM: SC - Storing char {} to stack addr {}", self.ax & 0xFF, addr);
                     
                     // check valid addr
                     if addr >= self.stack.len() {
@@ -297,6 +266,8 @@ impl VM {
                     let current_value = self.stack[addr];
                     self.stack[addr] = (current_value & !0xFF) | (self.ax & 0xFF); // keep other bits
                     self.sp += 1;
+                    
+                    println!("DEBUG VM: SC - After store: stack[{}] = {}", addr, self.stack[addr]);
                 },
                 
                 // push value
@@ -305,6 +276,7 @@ impl VM {
                         return Err("Stack overflow in PSH operation".to_string());
                     }
                     self.sp -= 1;
+                    println!("DEBUG VM: PSH - Pushing {} onto stack at position {}", self.ax, self.sp);
                     self.stack[self.sp] = self.ax;
                 },
                 
@@ -397,12 +369,139 @@ impl VM {
                     self.ax = 0; // not supported
                 },
                 op if op == OpCode::PRTF as u8 => {
-                    // Make sure we have access to the argument count
-                    if self.pc >= self.code.len() {
-                        return Err(format!("Unexpected end of code after PRTF at pc={}", self.pc - 1));
+                    // Get argument count
+                    let argc = self.next_code() as usize;
+                    
+                    if self.debug {
+                        println!("DEBUG VM: PRTF - Called with {} arguments", argc);
+                        for i in 0..argc {
+                            println!("  Arg {}: {} at stack[{}]", i, self.stack[self.sp + i], self.sp + i);
+                        }
                     }
                     
-                    self.ax = self.syscall_printf()?;
+                    // Format string is the first pushed argument (last in our stack)
+                    let format_addr = self.stack[self.sp + argc - 1] as usize;
+                    
+                    // Bounds check
+                    if format_addr >= self.data.len() {
+                        println!("ERROR: Invalid format string address: {}", format_addr);
+                        print!("<invalid format string>");
+                        std::io::stdout().flush().unwrap();
+                        
+                        // Clean up stack
+                        self.sp += argc;
+                        
+                        // Set return value to 0 for error
+                        self.ax = 0;
+                        return Ok(0);
+                    }
+                    
+                    // Read format string from data segment
+                    let mut format_str = String::new();
+                    let mut i = format_addr;
+                    while i < self.data.len() && self.data[i] != 0 {
+                        format_str.push(self.data[i] as char);
+                        i += 1;
+                    }
+                    
+                    if self.debug {
+                        println!("DEBUG VM: PRTF - Format string: \"{}\"", format_str);
+                    }
+                    
+                    // Process format string
+                    let mut result = String::new();
+                    let mut arg_idx = 0; // Start with first argument (excluding format string)
+                    let mut i = 0;
+                    
+                    while i < format_str.len() {
+                        let c = format_str.chars().nth(i).unwrap();
+                        
+                        if c == '%' && i + 1 < format_str.len() {
+                            let next_c = format_str.chars().nth(i + 1).unwrap();
+                            match next_c {
+                                'd' => {
+                                    // Integer format
+                                    if arg_idx < argc - 1 { // -1 because format string is an argument
+                                        // Arguments are in reverse order on the stack:
+                                        // sp + 0 = last argument
+                                        // sp + 1 = second-to-last argument
+                                        // ...
+                                        // sp + (argc-1) = format string
+                                        
+                                        // For printing, we want to go from first to last argument
+                                        // So they should be: sp + (argc-2), sp + (argc-3), etc.
+                                        let reverse_idx = argc - 2 - arg_idx;
+                                        let arg_val = self.stack[self.sp + reverse_idx];
+                                        
+                                        if self.debug {
+                                            println!("DEBUG VM: PRTF - %%d argument {} = {} (stack[{}])", 
+                                                    arg_idx, arg_val, self.sp + reverse_idx);
+                                        }
+                                        
+                                        // Format the integer
+                                        result.push_str(&arg_val.to_string());
+                                        arg_idx += 1;
+                                    } else {
+                                        result.push_str("<?>");
+                                    }
+                                    i += 2; // Skip format specifier
+                                },
+                                's' => {
+                                    // String format
+                                    if arg_idx < argc - 1 {
+                                        // Calculate reverse index as with %d
+                                        let reverse_idx = argc - 2 - arg_idx;
+                                        let str_addr = self.stack[self.sp + reverse_idx] as usize;
+                                        
+                                        if self.debug {
+                                            println!("DEBUG VM: PRTF - %%s argument {} = {} (stack[{}])", 
+                                                    arg_idx, str_addr, self.sp + reverse_idx);
+                                        }
+                                        
+                                        // Bounds check
+                                        if str_addr < self.data.len() {
+                                            // Read string from data segment
+                                            let mut j = str_addr;
+                                            while j < self.data.len() && self.data[j] != 0 {
+                                                result.push(self.data[j] as char);
+                                                j += 1;
+                                            }
+                                        } else {
+                                            result.push_str("<bad string>");
+                                        }
+                                        arg_idx += 1;
+                                    } else {
+                                        result.push_str("<?>");
+                                    }
+                                    i += 2; // Skip format specifier
+                                },
+                                '%' => {
+                                    // Literal % character
+                                    result.push('%');
+                                    i += 2; // Skip %%
+                                },
+                                _ => {
+                                    // Unknown format specifier - treat as literal
+                                    result.push('%');
+                                    i += 1;
+                                }
+                            }
+                        } else {
+                            // Regular character
+                            result.push(c);
+                            i += 1;
+                        }
+                    }
+                    
+                    // Print the formatted result
+                    print!("{}", result);
+                    std::io::stdout().flush().unwrap();
+                    
+                    // Clean up stack
+                    self.sp += argc;
+                    
+                    // Set return value to length of formatted string
+                    self.ax = result.len() as i64;
                 },
                 op if op == OpCode::MALC as u8 => {
                     self.ax = self.syscall_malloc()?;
@@ -560,127 +659,6 @@ impl VM {
         Ok(0) // read nothing
     }
     
-    /// handles printf syscall
-    fn syscall_printf(&mut self) -> Result<i64, String> {
-        // get arg count
-        let argc = self.next_code() as usize;
-        
-        if self.debug {
-            println!("PRINTF: called with {} arguments", argc);
-        }
-        
-        // check stack space
-        if self.sp + argc > self.stack.len() {
-            return Err(format!("Stack overflow in printf: sp={}, argc={}, stack_len={}",
-                              self.sp, argc, self.stack.len()));
-        }
-        
-        // args on stack
-        let format_addr = self.stack[self.sp] as usize;
-        
-        if self.debug {
-            println!("PRINTF: format string address: {}", format_addr);
-        }
-        
-        // check format addr
-        if format_addr >= self.data.len() {
-            // allow auto expand
-            let needed_size = format_addr + 1;
-            self.data.resize(needed_size, 0);
-            
-            // clean stack
-            self.sp += argc;
-            
-            // return 0
-            return Ok(0);
-        }
-        
-        // read format string
-        let mut format_str = String::new();
-        let mut i = format_addr;
-        while i < self.data.len() && self.data[i] != 0 {
-            format_str.push(self.data[i] as char);
-            i += 1;
-        }
-        
-        if self.debug {
-            println!("PRINTF: format string: \"{}\"", format_str);
-            println!("PRINTF: args on stack:");
-            for i in 0..argc {
-                if self.sp + i < self.stack.len() {
-                    println!("  Arg {}: {}", i, self.stack[self.sp + i]);
-                }
-            }
-        }
-        
-        // process format
-        let mut result = String::new();
-        let mut chars = format_str.chars().peekable();
-        let mut arg_index = 1;  // first arg after format
-        
-        while let Some(ch) = chars.next() {
-            if ch == '%' {
-                // handle format
-                match chars.next() {
-                    Some('d') => {
-                        // integer
-                        if arg_index < argc {
-                            let value = self.stack[self.sp + arg_index];
-                            result.push_str(&value.to_string());
-                            arg_index += 1;
-                        } else {
-                            result.push_str("?ARG?");
-                        }
-                    },
-                    Some('s') => {
-                        // string
-                        if arg_index < argc {
-                            let str_addr = self.stack[self.sp + arg_index] as usize;
-                            if str_addr < self.data.len() {
-                                let mut j = str_addr;
-                                while j < self.data.len() && self.data[j] != 0 {
-                                    result.push(self.data[j] as char);
-                                    j += 1;
-                                }
-                            } else {
-                                result.push_str("(invalid str)");
-                            }
-                            arg_index += 1;
-                        } else {
-                            result.push_str("?ARG?");
-                        }
-                    },
-                    Some('%') => {
-                        // escaped %
-                        result.push('%');
-                    },
-                    Some(c) => {
-                        // unknown format
-                        result.push('%');
-                        result.push(c);
-                    },
-                    None => {
-                        // end after %
-                        result.push('%');
-                    }
-                }
-            } else {
-                // normal char
-                result.push(ch);
-            }
-        }
-        
-        // output
-        print!("{}", result);
-        let _ = std::io::stdout().flush();
-        
-        // clean stack
-        self.sp += argc;
-        
-        // return length
-        Ok(result.len() as i64)
-    }
-    
     /// handles malloc syscall
     fn syscall_malloc(&mut self) -> Result<i64, String> {
         let size = self.stack[self.sp] as usize;
@@ -731,6 +709,51 @@ impl VM {
         }
         
         Ok(0) // identical
+    }
+    
+    fn op_to_string(&self, op: usize) -> String {
+        match op {
+            x if x == OpCode::LEA as usize => "LEA".to_string(),
+            x if x == OpCode::IMM as usize => "IMM".to_string(),
+            x if x == OpCode::JMP as usize => "JMP".to_string(),
+            x if x == OpCode::JSR as usize => "JSR".to_string(),
+            x if x == OpCode::BZ as usize => "BZ".to_string(),
+            x if x == OpCode::BNZ as usize => "BNZ".to_string(),
+            x if x == OpCode::ENT as usize => "ENT".to_string(),
+            x if x == OpCode::ADJ as usize => "ADJ".to_string(),
+            x if x == OpCode::LEV as usize => "LEV".to_string(),
+            x if x == OpCode::LI as usize => "LI".to_string(),
+            x if x == OpCode::LC as usize => "LC".to_string(),
+            x if x == OpCode::SI as usize => "SI".to_string(),
+            x if x == OpCode::SC as usize => "SC".to_string(),
+            x if x == OpCode::PSH as usize => "PSH".to_string(),
+            x if x == OpCode::OR as usize => "OR".to_string(),
+            x if x == OpCode::XOR as usize => "XOR".to_string(),
+            x if x == OpCode::AND as usize => "AND".to_string(),
+            x if x == OpCode::EQ as usize => "EQ".to_string(),
+            x if x == OpCode::NE as usize => "NE".to_string(),
+            x if x == OpCode::LT as usize => "LT".to_string(),
+            x if x == OpCode::GT as usize => "GT".to_string(),
+            x if x == OpCode::LE as usize => "LE".to_string(),
+            x if x == OpCode::GE as usize => "GE".to_string(),
+            x if x == OpCode::SHL as usize => "SHL".to_string(),
+            x if x == OpCode::SHR as usize => "SHR".to_string(),
+            x if x == OpCode::ADD as usize => "ADD".to_string(),
+            x if x == OpCode::SUB as usize => "SUB".to_string(),
+            x if x == OpCode::MUL as usize => "MUL".to_string(),
+            x if x == OpCode::DIV as usize => "DIV".to_string(),
+            x if x == OpCode::MOD as usize => "MOD".to_string(),
+            x if x == OpCode::OPEN as usize => "OPEN".to_string(),
+            x if x == OpCode::READ as usize => "READ".to_string(),
+            x if x == OpCode::CLOS as usize => "CLOS".to_string(),
+            x if x == OpCode::PRTF as usize => "PRTF".to_string(),
+            x if x == OpCode::MALC as usize => "MALC".to_string(),
+            x if x == OpCode::FREE as usize => "FREE".to_string(),
+            x if x == OpCode::MSET as usize => "MSET".to_string(),
+            x if x == OpCode::MCMP as usize => "MCMP".to_string(),
+            x if x == OpCode::EXIT as usize => "EXIT".to_string(),
+            _ => format!("Unknown({})", op),
+        }
     }
 }
 
