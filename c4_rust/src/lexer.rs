@@ -22,6 +22,16 @@ pub enum Token {
     
     // operators by precedence
     Assign,
+    AddAssign,   // +=
+    SubAssign,   // -=
+    MulAssign,   // *=
+    DivAssign,   // /=
+    ModAssign,   // %=
+    ShlAssign,   // <<=
+    ShrAssign,   // >>=
+    AndAssign,   // &=
+    XorAssign,   // ^=
+    OrAssign,    // |=
     Cond,
     Lor,
     Lan,
@@ -267,34 +277,158 @@ impl<'a> Lexer<'a> {
                         }
                     },
                     
-                    // operators and punctuation
+                    // assignment and compound assignments
                     '=' => {
-                        if let Some(&'=') = self.chars.peek() {
-                            self.chars.next();
-                            self.pos += 1;
-                            self.current_token = Token::Eq;
+                        // Check for equality (==) or just assignment (=)
+                        if let Some(&next_c) = self.chars.peek() {
+                            if next_c == '=' {
+                                self.chars.next();
+                                self.pos += 1;
+                                self.current_token = Token::Eq;
+                            } else {
+                                self.current_token = Token::Assign;
+                            }
                         } else {
                             self.current_token = Token::Assign;
                         }
                     },
+                    
+                    // add and +=
                     '+' => {
-                        if let Some(&'+') = self.chars.peek() {
-                            self.chars.next();
-                            self.pos += 1;
-                            self.current_token = Token::Inc;
+                        if let Some(&next_c) = self.chars.peek() {
+                            if next_c == '=' {
+                                self.chars.next();
+                                self.pos += 1;
+                                self.current_token = Token::AddAssign;
+                            } else if next_c == '+' {
+                                self.chars.next();
+                                self.pos += 1;
+                                self.current_token = Token::Inc;
+                            } else {
+                                self.current_token = Token::Add;
+                            }
                         } else {
                             self.current_token = Token::Add;
                         }
                     },
+                    
+                    // subtract and -=
                     '-' => {
-                        if let Some(&'-') = self.chars.peek() {
-                            self.chars.next();
-                            self.pos += 1;
-                            self.current_token = Token::Dec;
+                        if let Some(&next_c) = self.chars.peek() {
+                            if next_c == '=' {
+                                self.chars.next();
+                                self.pos += 1;
+                                self.current_token = Token::SubAssign;
+                            } else if next_c == '-' {
+                                self.chars.next();
+                                self.pos += 1;
+                                self.current_token = Token::Dec;
+                            } else {
+                                self.current_token = Token::Sub;
+                            }
                         } else {
                             self.current_token = Token::Sub;
                         }
                     },
+                    
+                    // multiply and *=
+                    '*' => {
+                        if let Some(&next_c) = self.chars.peek() {
+                            if next_c == '=' {
+                                self.chars.next();
+                                self.pos += 1;
+                                self.current_token = Token::MulAssign;
+                            } else {
+                                self.current_token = Token::Mul;
+                            }
+                        } else {
+                            self.current_token = Token::Mul;
+                        }
+                    },
+                    
+                    // divide and /=
+                    '/' => {
+                        if let Some(&next_c) = self.chars.peek() {
+                            if next_c == '/' {
+                                // Line comment
+                                self.chars.next();
+                                self.pos += 1;
+                                
+                                // Consume characters until end of line
+                                while let Some(&next_c) = self.chars.peek() {
+                                    if next_c == '\n' {
+                                        break;
+                                    }
+                                    self.chars.next();
+                                    self.pos += 1;
+                                }
+                                
+                                // Skip to next token
+                                return self.next();
+                            } else if next_c == '*' {
+                                // Block comment
+                                self.chars.next();
+                                self.pos += 1;
+                                
+                                // Variables to track comment nesting
+                                let mut depth = 1;
+                                
+                                // Handle nested comments
+                                while depth > 0 {
+                                    if let Some(c) = self.chars.next() {
+                                        self.pos += 1;
+                                        
+                                        if c == '\n' {
+                                            self.line += 1;
+                                            self.lp = self.pos;
+                                        } else if c == '/' && self.chars.peek() == Some(&'*') {
+                                            // Found nested comment start
+                                            self.chars.next();
+                                            self.pos += 1;
+                                            depth += 1;
+                                        } else if c == '*' && self.chars.peek() == Some(&'/') {
+                                            // Found comment end
+                                            self.chars.next();
+                                            self.pos += 1;
+                                            depth -= 1;
+                                        }
+                                    } else {
+                                        // Reached EOF inside comment
+                                        self.current_token = Token::Eof;
+                                        return self.current_token;
+                                    }
+                                }
+                                
+                                // Skip to next token
+                                return self.next();
+                            } else if next_c == '=' {
+                                self.chars.next();
+                                self.pos += 1;
+                                self.current_token = Token::DivAssign;
+                            } else {
+                                self.current_token = Token::Div;
+                            }
+                        } else {
+                            self.current_token = Token::Div;
+                        }
+                    },
+                    
+                    // modulo and %=
+                    '%' => {
+                        if let Some(&next_c) = self.chars.peek() {
+                            if next_c == '=' {
+                                self.chars.next();
+                                self.pos += 1;
+                                self.current_token = Token::ModAssign;
+                            } else {
+                                self.current_token = Token::Mod;
+                            }
+                        } else {
+                            self.current_token = Token::Mod;
+                        }
+                    },
+                    
+                    // operators and punctuation
                     '!' => {
                         if let Some(&'=') = self.chars.peek() {
                             self.chars.next();
@@ -305,52 +439,110 @@ impl<'a> Lexer<'a> {
                         }
                     },
                     '<' => {
-                        if let Some(&'=') = self.chars.peek() {
-                            self.chars.next();
-                            self.pos += 1;
-                            self.current_token = Token::Le;
-                        } else if let Some(&'<') = self.chars.peek() {
-                            self.chars.next();
-                            self.pos += 1;
-                            self.current_token = Token::Shl;
+                        if let Some(&next_c) = self.chars.peek() {
+                            if next_c == '=' {
+                                self.chars.next();
+                                self.pos += 1;
+                                self.current_token = Token::Le;
+                            } else if next_c == '<' {
+                                self.chars.next();
+                                self.pos += 1;
+                                
+                                // Check for <<=
+                                if let Some(&next_next_c) = self.chars.peek() {
+                                    if next_next_c == '=' {
+                                        self.chars.next();
+                                        self.pos += 1;
+                                        self.current_token = Token::ShlAssign;
+                                    } else {
+                                        self.current_token = Token::Shl;
+                                    }
+                                } else {
+                                    self.current_token = Token::Shl;
+                                }
+                            } else {
+                                self.current_token = Token::Lt;
+                            }
                         } else {
                             self.current_token = Token::Lt;
                         }
                     },
                     '>' => {
-                        if let Some(&'=') = self.chars.peek() {
-                            self.chars.next();
-                            self.pos += 1;
-                            self.current_token = Token::Ge;
-                        } else if let Some(&'>') = self.chars.peek() {
-                            self.chars.next();
-                            self.pos += 1;
-                            self.current_token = Token::Shr;
+                        if let Some(&next_c) = self.chars.peek() {
+                            if next_c == '=' {
+                                self.chars.next();
+                                self.pos += 1;
+                                self.current_token = Token::Ge;
+                            } else if next_c == '>' {
+                                self.chars.next();
+                                self.pos += 1;
+                                
+                                // Check for >>=
+                                if let Some(&next_next_c) = self.chars.peek() {
+                                    if next_next_c == '=' {
+                                        self.chars.next();
+                                        self.pos += 1;
+                                        self.current_token = Token::ShrAssign;
+                                    } else {
+                                        self.current_token = Token::Shr;
+                                    }
+                                } else {
+                                    self.current_token = Token::Shr;
+                                }
+                            } else {
+                                self.current_token = Token::Gt;
+                            }
                         } else {
                             self.current_token = Token::Gt;
                         }
                     },
-                    '|' => {
-                        if let Some(&'|') = self.chars.peek() {
-                            self.chars.next();
-                            self.pos += 1;
-                            self.current_token = Token::Lor;
-                        } else {
-                            self.current_token = Token::Or;
-                        }
-                    },
                     '&' => {
-                        if let Some(&'&') = self.chars.peek() {
-                            self.chars.next();
-                            self.pos += 1;
-                            self.current_token = Token::Lan;
+                        if let Some(&next_c) = self.chars.peek() {
+                            if next_c == '&' {
+                                self.chars.next();
+                                self.pos += 1;
+                                self.current_token = Token::Lan;
+                            } else if next_c == '=' {
+                                self.chars.next();
+                                self.pos += 1;
+                                self.current_token = Token::AndAssign;
+                            } else {
+                                self.current_token = Token::And;
+                            }
                         } else {
                             self.current_token = Token::And;
                         }
                     },
-                    '^' => self.current_token = Token::Xor,
-                    '%' => self.current_token = Token::Mod,
-                    '*' => self.current_token = Token::Mul,
+                    '|' => {
+                        if let Some(&next_c) = self.chars.peek() {
+                            if next_c == '|' {
+                                self.chars.next();
+                                self.pos += 1;
+                                self.current_token = Token::Lor;
+                            } else if next_c == '=' {
+                                self.chars.next();
+                                self.pos += 1;
+                                self.current_token = Token::OrAssign;
+                            } else {
+                                self.current_token = Token::Or;
+                            }
+                        } else {
+                            self.current_token = Token::Or;
+                        }
+                    },
+                    '^' => {
+                        if let Some(&next_c) = self.chars.peek() {
+                            if next_c == '=' {
+                                self.chars.next();
+                                self.pos += 1;
+                                self.current_token = Token::XorAssign;
+                            } else {
+                                self.current_token = Token::Xor;
+                            }
+                        } else {
+                            self.current_token = Token::Xor;
+                        }
+                    },
                     '[' => self.current_token = Token::Brak,
                     '?' => self.current_token = Token::Cond,
                     '~' => self.current_token = Token::Tilde,
@@ -362,28 +554,6 @@ impl<'a> Lexer<'a> {
                     ']' => self.current_token = Token::RightBracket,
                     ',' => self.current_token = Token::Comma,
                     ':' => self.current_token = Token::Colon,
-                    
-                    // division or comments
-                    '/' => {
-                        if let Some(&'/') = self.chars.peek() {
-                            // skip line comment
-                            self.chars.next(); // consume second '/'
-                            self.pos += 1;
-                            
-                            while let Some(&next_c) = self.chars.peek() {
-                                if next_c == '\n' {
-                                    break;
-                                }
-                                self.chars.next();
-                                self.pos += 1;
-                            }
-                            
-                            // get next after comment
-                            return self.next();
-                        } else {
-                            self.current_token = Token::Div;
-                        }
-                    },
                     
                     // unknown char
                     _ => {

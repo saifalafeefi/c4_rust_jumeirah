@@ -20,8 +20,8 @@ pub struct VM {
 impl VM {
     /// creates new VM
     pub fn new(code: Vec<i64>, data: Vec<u8>, debug: bool) -> Self {
-        // smaller stack is enough
-        let stack_size = 1024;
+        // larger stack size to prevent overflow
+        let stack_size = 8192;
         
         // init stack to zeros
         let mut stack = Vec::with_capacity(stack_size);
@@ -357,6 +357,17 @@ impl VM {
                     self.stack[self.sp] = self.ax;
                 },
                 
+                // swap top of stack with ax
+                op if op == OpCode::SWP as u8 => {
+                    if self.sp >= self.stack.len() {
+                        return Err("Stack underflow in SWP operation".to_string());
+                    }
+                    let temp = self.stack[self.sp];
+                    self.stack[self.sp] = self.ax;
+                    self.ax = temp;
+                    println!("DEBUG VM: SWP - Swapped with top of stack, AX now = {}", self.ax);
+                },
+                
                 // binary ops
                 op if op == OpCode::OR as u8 => {
                     self.ax = self.stack[self.sp] | self.ax;
@@ -661,7 +672,7 @@ impl VM {
     /// shows debug info
     fn print_debug_info(&self, op: usize) {
         const OP_NAMES: &[&str] = &[
-            "LEA ", "IMM ", "JMP ", "JSR ", "BZ  ", "BNZ ", "ENT ", "ADJ ", "LEV ", "LI  ", "LC  ", "SI  ", "SC  ", "PSH ",
+            "LEA ", "IMM ", "JMP ", "JSR ", "BZ  ", "BNZ ", "ENT ", "ADJ ", "LEV ", "LI  ", "LC  ", "SI  ", "SC  ", "PSH ", "SWP ",
             "OR  ", "XOR ", "AND ", "EQ  ", "NE  ", "LT  ", "GT  ", "LE  ", "GE  ", "SHL ", "SHR ", "ADD ", "SUB ", "MUL ", "DIV ", "MOD ",
             "OPEN", "READ", "CLOS", "PRTF", "MALC", "FREE", "MSET", "MCMP", "EXIT",
         ];
@@ -845,6 +856,7 @@ impl VM {
             x if x == OpCode::SI as usize => "SI".to_string(),
             x if x == OpCode::SC as usize => "SC".to_string(),
             x if x == OpCode::PSH as usize => "PSH".to_string(),
+            x if x == OpCode::SWP as usize => "SWP".to_string(),
             x if x == OpCode::OR as usize => "OR".to_string(),
             x if x == OpCode::XOR as usize => "XOR".to_string(),
             x if x == OpCode::AND as usize => "AND".to_string(),
