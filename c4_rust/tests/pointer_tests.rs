@@ -8,7 +8,7 @@ fn test_pointer_dereferencing() {
     let result = parser.parse();
     assert!(result.is_ok(), "Parsing failed: {:?}", result.err());
     
-    // The code should contain LI (load int) after dereferencing
+    // code should have LI
     let (code, _) = result.unwrap();
     let li_ops_count = code.iter().filter(|&&x| x == OpCode::LI as i64).count();
     assert!(li_ops_count > 0, "No LI operation found after dereferencing");
@@ -22,7 +22,7 @@ fn test_address_of_operator() {
     let result = parser.parse();
     assert!(result.is_ok(), "Parsing failed: {:?}", result.err());
     
-    // When using address-of operator, the LEA instruction should be used
+    // check for LEA
     let (code, _) = result.unwrap();
     let lea_ops_count = code.iter().filter(|&&x| x == OpCode::LEA as i64).count();
     assert!(lea_ops_count > 0, "No LEA operation found for address-of operator");
@@ -36,7 +36,7 @@ fn test_pointer_arithmetic() {
     let result = parser.parse();
     assert!(result.is_ok(), "Parsing failed: {:?}", result.err());
     
-    // Pointer arithmetic should use PSH and IMM for pointer size
+    // need PSH and IMM
     let (code, _) = result.unwrap();
     let psh_count = code.iter().filter(|&&x| x == OpCode::PSH as i64).count();
     let imm_count = code.iter().filter(|&&x| x == OpCode::IMM as i64).count();
@@ -54,7 +54,7 @@ fn test_double_pointer() {
 
 #[test]
 fn test_multiple_pointer_declarations() {
-    // Test char *p, *q; inside a function
+    // test char *p, *q
     let source = "int main() { char *p, *q; p = &q; return 0; }";
     let mut parser = Parser::new(source, false);
     parser.init().unwrap();
@@ -62,36 +62,35 @@ fn test_multiple_pointer_declarations() {
     
     assert!(result.is_ok(), "Parsing failed with multiple pointer declarations: {:?}", result.err());
     
-    // Print all symbols for debugging
+    // print for debugging
     let symbols = parser.get_symbols();
     println!("Symbol table contents:");
     for symbol in symbols {
         println!("Symbol: {}, Class: {:?}, Type: {:?}", symbol.name, symbol.class, symbol.typ);
     }
     
-    // Simplify and just check if the parse succeeded
+    // just check it works
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_continued_declaration_with_address_of() {
-    // This mimics the c4.c declaration style with multiple pointer declarations and address-of
+    // mimics c4.c style
     let source = "char *p, *lp, *data; int main() { p = &lp; return 0; }";
     let mut parser = Parser::new(source, false);
     parser.init().unwrap();
     
-    // Just parse the whole program directly
+    // parse whole program
     let result = parser.parse();
     assert!(result.is_ok(), "Parsing failed with continued declarations: {:?}", result.err());
     
-    // Print the full symbol table
+    // show symbols
     println!("Full symbol table:");
     let symbols = parser.get_symbols();
     for symbol in symbols {
         println!("Symbol: {}, Class: {:?}, Type: {:?}", symbol.name, symbol.class, symbol.typ);
     }
     
-    // At this point, we're mainly verifying that the parse was successful
-    // And that we don't crash on the address-of operation
+    // verify it worked
     assert!(result.is_ok());
 } 

@@ -8,24 +8,24 @@ fn test_function_parameter_parsing() {
     let result = parser.parse();
     assert!(result.is_ok(), "Parsing failed: {:?}", result.err());
     
-    // Find the function in the symbol table
+    // find function
     let symbols = parser.get_symbols();
     let add_fn = symbols.iter().find(|s| s.name == "add");
     assert!(add_fn.is_some(), "Function 'add' not found in symbol table");
     
-    // Verify function properties
+    // check function type
     let add_fn = add_fn.unwrap();
     assert_eq!(add_fn.class, SymbolClass::Fun);
     assert!(matches!(add_fn.typ, Type::Int));
     
-    // Check generated code
+    // check code
     let (code, _) = result.unwrap();
     
-    // ENT instruction should be in the code for local stack space
+    // look for ENT
     let ent_pos = code.iter().position(|&x| x == OpCode::ENT as i64);
     assert!(ent_pos.is_some(), "ENT instruction not found in code");
     
-    // LEV instruction should be in the code for function return
+    // look for LEV
     let lev_pos = code.iter().position(|&x| x == OpCode::LEV as i64);
     assert!(lev_pos.is_some(), "LEV instruction not found in code");
 }
@@ -38,19 +38,19 @@ fn test_function_local_variables() {
     let result = parser.parse();
     assert!(result.is_ok(), "Parsing failed: {:?}", result.err());
     
-    // Find the function in the symbol table
+    // find function
     let symbols = parser.get_symbols();
     let calc_fn = symbols.iter().find(|s| s.name == "calc");
     assert!(calc_fn.is_some(), "Function 'calc' not found in symbol table");
     
-    // Check generated code
+    // check code
     let (code, _) = result.unwrap();
     
-    // ENT instruction should be in the code
+    // look for ENT
     let ent_pos = code.iter().position(|&x| x == OpCode::ENT as i64);
     assert!(ent_pos.is_some(), "ENT instruction not found in code");
     
-    // LEV instruction should be in the code for function return
+    // look for LEV
     let lev_pos = code.iter().position(|&x| x == OpCode::LEV as i64);
     assert!(lev_pos.is_some(), "LEV instruction not found in code");
 }
@@ -63,8 +63,7 @@ fn test_multiple_parameter_types() {
     let result = parser.parse();
     assert!(result.is_ok(), "Parsing failed: {:?}", result.err());
     
-    // Verify we can parse various parameter types
-    // Success of parsing is already an indication it works
+    // success means it works
     assert!(result.is_ok());
 }
 

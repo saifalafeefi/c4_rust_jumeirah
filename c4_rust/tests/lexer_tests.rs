@@ -22,7 +22,7 @@ fn test_lexer_identifiers() {
     let source = "x y _var test123";
     let mut lexer = Lexer::new(source);
     
-    // Each identifier should be tokenized correctly
+    // check all ids
     assert!(matches!(lexer.next(), Token::Id(_)));
     assert!(matches!(lexer.next(), Token::Id(_)));
     assert!(matches!(lexer.next(), Token::Id(_)));
@@ -86,7 +86,7 @@ fn test_lexer_comments() {
     assert!(matches!(lexer.next(), Token::Id(_)));
     assert_eq!(lexer.next(), Token::Semicolon);
     
-    // Comments should be skipped, next token should be Int
+    // comments get skipped
     assert_eq!(lexer.next(), Token::Int);
     assert!(matches!(lexer.next(), Token::Id(_)));
     assert_eq!(lexer.next(), Token::Semicolon);

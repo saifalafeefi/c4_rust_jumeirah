@@ -1,4 +1,4 @@
-// Test program for printf functionality
+// tests printf
 int main() {
     int a;
     int b;

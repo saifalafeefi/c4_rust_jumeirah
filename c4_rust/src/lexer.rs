@@ -1,5 +1,5 @@
-/// lexer module for tokenizing C source code
-/// converts raw source into tokens for the parser
+/// tokenizes C code
+/// makes tokens for parser
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Token {
@@ -20,7 +20,7 @@ pub enum Token {
     While,
     Void,
     
-    // operators (in precedence order)
+    // operators by precedence
     Assign,
     Cond,
     Lor,
@@ -45,7 +45,7 @@ pub enum Token {
     Dec,
     Brak,
     
-    // special characters
+    // special chars
     Semicolon,
     LeftBrace,
     RightBrace,
@@ -70,11 +70,11 @@ pub struct Lexer<'a> {
     current_token: Token,
     current_value: i64,
     string_buffer: Vec<u8>,
-    lp: usize, // line position for source printing
+    lp: usize, // for source printing
 }
 
 impl<'a> Lexer<'a> {
-    /// create a new lexer for the given source code
+    /// creates new lexer
     pub fn new(source: &'a str) -> Self {
         Lexer {
             source,
@@ -88,29 +88,29 @@ impl<'a> Lexer<'a> {
         }
     }
     
-    /// retrieve the current token
+    /// gets current token
     pub fn token(&self) -> Token {
         self.current_token
     }
     
-    /// retrieve the current numeric value (for Num tokens)
+    /// gets numeric value
     pub fn value(&self) -> i64 {
         self.current_value
     }
     
-    /// retrieve the current line number
+    /// gets line number
     pub fn line(&self) -> usize {
         self.line
     }
     
-    /// retrieve the string buffer
+    /// gets string buffer
     pub fn string_buffer(&self) -> &[u8] {
         &self.string_buffer
     }
     
-    /// advance to the next token
+    /// moves to next token
     pub fn next(&mut self) -> Token {
-        // skip whitespace and comments
+        // skip spaces and comments
         self.skip_whitespace();
         
         // check for EOF
@@ -119,17 +119,17 @@ impl<'a> Lexer<'a> {
             return self.current_token;
         }
         
-        // process the next character
+        // process next char
         match self.chars.next() {
             Some(c) => {
                 self.pos += 1;
                 match c {
-                    // Identifiers and keywords
+                    // identifiers and keywords
                     'a'..='z' | 'A'..='Z' | '_' => {
                         let mut hash = c as u64;
                         let start_pos = self.pos - 1;
                         
-                        // read the entire identifier
+                        // read whole identifier
                         while let Some(&next_c) = self.chars.peek() {
                             if next_c.is_alphanumeric() || next_c == '_' {
                                 hash = hash.wrapping_mul(147).wrapping_add(next_c as u64);
@@ -143,7 +143,7 @@ impl<'a> Lexer<'a> {
                         let id_length = self.pos - start_pos;
                         hash = (hash << 6) + id_length as u64;
                         
-                        // Check if it's a keyword
+                        // check if keyword
                         let id_str = &self.source[start_pos..self.pos];
                         self.current_token = match id_str {
                             "char" => Token::Char,
@@ -156,16 +156,16 @@ impl<'a> Lexer<'a> {
                             "sizeof" => Token::Sizeof,
                             "while" => Token::While,
                             "void" => Token::Void,
-                            // If not a keyword, it's an identifier
+                            // otherwise identifier
                             _ => Token::Id(hash as usize),
                         };
                     },
                     
-                    // Numbers
+                    // numbers
                     '0'..='9' => {
                         let mut value = (c as i64) - ('0' as i64);
                         
-                        // Hex number
+                        // hex number
                         if value == 0 && self.chars.peek() == Some(&'x') || self.chars.peek() == Some(&'X') {
                             self.chars.next(); // consume 'x'
                             self.pos += 1;
@@ -186,7 +186,7 @@ impl<'a> Lexer<'a> {
                                 }
                             }
                         }
-                        // Octal number
+                        // octal number
                         else if value == 0 {
                             while let Some(&next_c) = self.chars.peek() {
                                 if next_c >= '0' && next_c <= '7' {
@@ -198,7 +198,7 @@ impl<'a> Lexer<'a> {
                                 }
                             }
                         }
-                        // Decimal number
+                        // decimal number
                         else {
                             while let Some(&next_c) = self.chars.peek() {
                                 if next_c.is_digit(10) {
@@ -215,19 +215,19 @@ impl<'a> Lexer<'a> {
                         self.current_token = Token::Num(value);
                     },
                     
-                    // String literals
+                    // strings
                     '\'' | '"' => {
                         let string_delim = c;
                         let start_pos = self.string_buffer.len();
                         
                         while let Some(&next_c) = self.chars.peek() {
                             if next_c == string_delim {
-                                self.chars.next(); // consume closing quote
+                                self.chars.next(); // consume quote
                                 self.pos += 1;
                                 break;
                             }
                             
-                            // Handle escape sequences
+                            // handle escapes
                             if next_c == '\\' {
                                 self.chars.next(); // consume backslash
                                 self.pos += 1;
@@ -251,11 +251,11 @@ impl<'a> Lexer<'a> {
                         }
                         
                         if string_delim == '"' {
-                            // For string literals, return the index to the start of the string
+                            // for strings
                             self.current_value = start_pos as i64;
                             self.current_token = Token::Str(start_pos);
                         } else {
-                            // For character literals, return the character value
+                            // for chars
                             if start_pos < self.string_buffer.len() {
                                 self.current_value = self.string_buffer[start_pos] as i64;
                                 self.current_token = Token::Num(self.current_value);
@@ -266,7 +266,7 @@ impl<'a> Lexer<'a> {
                         }
                     },
                     
-                    // Operators and punctuation
+                    // operators and punctuation
                     '=' => {
                         if let Some(&'=') = self.chars.peek() {
                             self.chars.next();
@@ -362,10 +362,10 @@ impl<'a> Lexer<'a> {
                     ',' => self.current_token = Token::Comma,
                     ':' => self.current_token = Token::Colon,
                     
-                    // Division or comments
+                    // division or comments
                     '/' => {
                         if let Some(&'/') = self.chars.peek() {
-                            // This is a comment, skip to end of line
+                            // skip line comment
                             self.chars.next(); // consume second '/'
                             self.pos += 1;
                             
@@ -377,16 +377,16 @@ impl<'a> Lexer<'a> {
                                 self.pos += 1;
                             }
                             
-                            // After skipping comment, recursively get next token
+                            // get next after comment
                             return self.next();
                         } else {
                             self.current_token = Token::Div;
                         }
                     },
                     
-                    // Unknown character
+                    // unknown char
                     _ => {
-                        // Just skip unknown characters
+                        // skip it
                         self.current_token = self.next();
                     }
                 }
@@ -397,7 +397,7 @@ impl<'a> Lexer<'a> {
         }
     }
     
-    /// skip whitespace and comments
+    /// skips spaces and comments
     fn skip_whitespace(&mut self) {
         while let Some(&c) = self.chars.peek() {
             match c {
@@ -412,7 +412,7 @@ impl<'a> Lexer<'a> {
                     self.lp = self.pos;
                 },
                 '#' => {
-                    // skip preprocessor directives
+                    // skip preprocessor stuff
                     self.chars.next();
                     self.pos += 1;
                     while let Some(&c) = self.chars.peek() {
@@ -423,24 +423,24 @@ impl<'a> Lexer<'a> {
                         self.pos += 1;
                     }
                 },
-                _ => return, // not whitespace
+                _ => return, // not space
             }
         }
     }
     
-    /// get source code line position for error reporting
+    /// gets line position
     pub fn get_line_pos(&self) -> usize {
         self.lp
     }
     
-    /// check if the source code contains a given string
+    /// checks for text
     pub fn source_contains(&self, text: &str) -> bool {
         self.source.contains(text)
     }
     
-    /// peek at the next character in the source without consuming it
+    /// peeks next char
     pub fn peek_next(&self) -> Option<char> {
-        // We can only peek on the iterator as it is, so we'll access the source directly
+        // access source directly
         let current_pos = self.pos;
         if current_pos < self.source.len() {
             self.source[current_pos..].chars().next()
@@ -512,7 +512,7 @@ mod tests {
     fn test_identifiers() {
         let mut lexer = Lexer::new("a abc x123 _var");
         
-        // Just check if they're identifiers, exact hash values will vary
+        // check if identifiers
         match lexer.next() {
             Token::Id(_) => assert!(true),
             _ => assert!(false, "Expected identifier"),
@@ -540,12 +540,12 @@ mod tests {
     fn test_strings() {
         let mut lexer = Lexer::new("\"hello\" 'c'");
         
-        // String
+        // string
         assert_eq!(lexer.next(), Token::Str(0));
         let str_content = lexer.string_buffer();
         assert_eq!(str_content, b"hello");
         
-        // Character
+        // char
         assert_eq!(lexer.next(), Token::Num('c' as i64));
         assert_eq!(lexer.value(), 'c' as i64);
         

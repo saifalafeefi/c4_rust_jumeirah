@@ -1,5 +1,5 @@
-/// main entry point for the c4 compiler
-/// handles command line arguments and initializes the compiler
+/// entry point for c4
+/// handles args and setup
 
 pub mod lexer;
 pub mod parser;
@@ -17,7 +17,7 @@ fn main() {
     let mut debug = false;
     let mut arg_index = 1;
     
-    // parse command line flags
+    // check flags
     while arg_index < args.len() && args[arg_index].starts_with('-') {
         match args[arg_index].as_str() {
             "-s" => {
@@ -42,7 +42,7 @@ fn main() {
     
     let filename = &args[arg_index];
     
-    // read source file
+    // open source
     let mut file = match File::open(filename) {
         Ok(file) => file,
         Err(_) => {
@@ -57,7 +57,7 @@ fn main() {
         process::exit(1);
     }
     
-    // initialize compiler and run
+    // run compiler
     if let Err(err) = vm::run(&source, src, debug) {
         eprintln!("{}", err);
         process::exit(1);

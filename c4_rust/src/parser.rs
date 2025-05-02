@@ -1,9 +1,9 @@
-/// parser module for analyzing C source code
-/// parses tokens and generates intermediate code for the VM
+/// parses C code
+/// generates VM code
 
 use crate::lexer::{Lexer, Token};
 
-/// type identifiers for parsed expressions
+/// type identifiers
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     Char,
@@ -31,7 +31,7 @@ impl Type {
     }
 }
 
-/// symbol classes for identifiers
+/// symbol classes
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SymbolClass {
     Fun, // function
@@ -48,13 +48,13 @@ pub struct Symbol {
     pub class: SymbolClass,
     pub typ: Type,
     pub value: i64,
-    // for local variables that are shadowing global ones
+    // for shadowed globals
     pub prev_class: Option<SymbolClass>,
     pub prev_type: Option<Type>,
     pub prev_value: Option<i64>,
 }
 
-/// instruction opcodes for the VM
+/// VM instructions
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum OpCode {
     LEA, IMM, JMP, JSR, BZ, BNZ, ENT, ADJ, LEV, LI, LC, SI, SC, PSH,
@@ -62,7 +62,7 @@ pub enum OpCode {
     OPEN, READ, CLOS, PRTF, MALC, FREE, MSET, MCMP, EXIT,
 }
 
-/// parser state for generating code
+/// generates code
 pub struct Parser<'a> {
     lexer: Lexer<'a>,
     symbols: Vec<Symbol>,

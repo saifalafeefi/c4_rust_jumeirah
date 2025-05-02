@@ -1,8 +1,8 @@
-# Run all tests
+# run all tests
 Write-Host "Running unit tests..." -ForegroundColor Green
 cargo test
 
-# Run C test programs
+# run c test programs
 Write-Host "Running C test programs..." -ForegroundColor Green
 cargo run -- simple_test.c
 cargo run -- -d simple_test.c

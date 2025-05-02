@@ -1,4 +1,4 @@
-// Simple test for printf with one variable
+// basic printf test
 int main() {
     int x;
     x = 42;

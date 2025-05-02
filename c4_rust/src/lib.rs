@@ -1,6 +1,5 @@
-/// c4 rust - a rust implementation of the c4 compiler
-/// this crate reimplements the c4 compiler in rust while maintaining 
-/// its self-hosting capability and core functionality.
+/// c4 compiler in rust
+/// keeps self-hosting ability intact
 
 pub mod lexer;
 pub mod parser;

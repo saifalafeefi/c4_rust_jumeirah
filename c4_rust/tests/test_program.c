@@ -1,5 +1,5 @@
-// test for c4 rust
-// tests functions, vars, loops, pointers
+// test for C4 Rust
+// tests functions, vars, conditionals, loops, pointers
 
 // adds two numbers
 int add(int x, int y) {
@@ -82,7 +82,7 @@ int main() {
     ptr = &n1;
     printf("First value via pointer: %d\n", *ptr);
     
-    // change pointer target
+    // change pointer
     ptr = &n2;
     printf("Second value via pointer: %d\n", *ptr);
     
