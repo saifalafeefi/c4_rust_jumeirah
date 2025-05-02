@@ -56,6 +56,7 @@ pub enum Token {
     Comma,
     Colon,
     Tilde,
+    Not,
     
     // internal tokens
     Eof,
@@ -300,7 +301,7 @@ impl<'a> Lexer<'a> {
                             self.pos += 1;
                             self.current_token = Token::Ne;
                         } else {
-                            self.current_token = Token::Tilde; // Using Tilde for '!' in this implementation
+                            self.current_token = Token::Not;
                         }
                     },
                     '<' => {
@@ -472,7 +473,7 @@ mod tests {
         assert_eq!(lexer.next(), Token::Ge);
         assert_eq!(lexer.next(), Token::Lan);
         assert_eq!(lexer.next(), Token::Lor);
-        assert_eq!(lexer.next(), Token::Tilde);
+        assert_eq!(lexer.next(), Token::Not);
         assert_eq!(lexer.next(), Token::Eof);
     }
     

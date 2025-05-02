@@ -386,7 +386,7 @@ impl VM {
                     self.sp += 1;
                 },
                 
-                // syscalls
+                // system calls
                 op if op == OpCode::OPEN as u8 => {
                     self.ax = self.syscall_open()?;
                 },
@@ -397,6 +397,11 @@ impl VM {
                     self.ax = 0; // not supported
                 },
                 op if op == OpCode::PRTF as u8 => {
+                    // Make sure we have access to the argument count
+                    if self.pc >= self.code.len() {
+                        return Err(format!("Unexpected end of code after PRTF at pc={}", self.pc - 1));
+                    }
+                    
                     self.ax = self.syscall_printf()?;
                 },
                 op if op == OpCode::MALC as u8 => {
@@ -745,6 +750,36 @@ pub fn run(source: &str, src: bool, debug: bool) -> Result<i64, String> {
     // early return if parsing only
     if src {
         return Ok(0);
+    }
+    
+    // Print the code in debug mode
+    if debug {
+        println!("Generated code (length: {}):", code.len());
+        let op_names = [
+            "LEA", "IMM", "JMP", "JSR", "BZ", "BNZ", "ENT", "ADJ", "LEV", "LI", "LC", "SI", "SC", "PSH",
+            "OR", "XOR", "AND", "EQ", "NE", "LT", "GT", "LE", "GE", "SHL", "SHR", "ADD", "SUB", "MUL", "DIV", "MOD",
+            "OPEN", "READ", "CLOS", "PRTF", "MALC", "FREE", "MSET", "MCMP", "EXIT",
+        ];
+        
+        let mut i = 0;
+        while i < code.len() {
+            let op = code[i] as usize;
+            if op < op_names.len() {
+                print!("{}: {} ", i, op_names[op]);
+                
+                // Instructions like IMM, JMP, etc. have an immediate operand
+                if op <= OpCode::ADJ as usize && i + 1 < code.len() {
+                    println!("{}", code[i + 1]);
+                    i += 2;
+                } else {
+                    println!();
+                    i += 1;
+                }
+            } else {
+                println!("{}: Unknown op: {}", i, op);
+                i += 1;
+            }
+        }
     }
     
     // execute code

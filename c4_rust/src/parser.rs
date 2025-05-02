@@ -505,7 +505,7 @@ impl<'a> Parser<'a> {
                         self.add_symbol_with_history(
                             &var_name,
                             SymbolClass::Loc,
-                            var_type,
+                            var_type.clone(),
                             self.locals as i64,
                             Some(old_class),
                             Some(old_type),
@@ -516,13 +516,35 @@ impl<'a> Parser<'a> {
                         self.add_symbol(
                             &var_name,
                             SymbolClass::Loc,
-                            var_type,
+                            var_type.clone(),
                             self.locals as i64,
                         )?;
                     }
                     
                     self.locals += 1;
                     self.next();
+
+                    // Check for initialization
+                    if self.token() == Token::Assign {
+                        self.next(); // Skip '='
+                        
+                        // Generate code to get the address of the local variable
+                        self.code.push(OpCode::LEA as i64);
+                        self.code.push((self.locals - 1) as i64);
+                        
+                        // Push the address to the stack
+                        self.code.push(OpCode::PSH as i64);
+                        
+                        // Parse the initialization expression
+                        self.expr(0)?;
+                        
+                        // Store the value to the local variable
+                        if var_type == Type::Char {
+                            self.code.push(OpCode::SC as i64);
+                        } else {
+                            self.code.push(OpCode::SI as i64);
+                        }
+                    }
                 } else {
                     return Err(format!("Line {}: Local variable name expected", self.lexer.line()));
                 }
@@ -833,6 +855,11 @@ impl<'a> Parser<'a> {
                         SymbolClass::Sys => {
                             // System call
                             self.code.push(sym_value); // Push system call ID
+                            
+                            // If this is printf, also push the argument count
+                            if name == "printf" {
+                                self.code.push(arg_count as i64);
+                            }
                         },
                         SymbolClass::Fun => {
                             // User-defined function
@@ -846,7 +873,7 @@ impl<'a> Parser<'a> {
                     self.current_type = sym_type;
                     
                     // Clean up stack if there were arguments
-                    if arg_count > 0 {
+                    if arg_count > 0 && name != "printf" { // Printf handles its own stack cleanup
                         self.code.push(OpCode::ADJ as i64);
                         self.code.push(arg_count);
                     }
@@ -968,6 +995,26 @@ impl<'a> Parser<'a> {
                 } else {
                     return Err(format!("Line {}: Invalid address-of operation - empty expression", self.lexer.line()));
                 }
+            },
+            Token::Not => {
+                // Logical NOT operator
+                self.next();
+                self.expr(11)?;
+                self.code.push(OpCode::PSH as i64);
+                self.code.push(OpCode::IMM as i64);
+                self.code.push(0);  // Push 0 for comparison
+                self.code.push(OpCode::EQ as i64);  // Test if expression == 0
+                self.current_type = Type::Int;
+            },
+            Token::Tilde => {
+                // Bitwise NOT operator
+                self.next();
+                self.expr(11)?;
+                self.code.push(OpCode::PSH as i64);
+                self.code.push(OpCode::IMM as i64);
+                self.code.push(-1);  // Push -1 for XOR
+                self.code.push(OpCode::XOR as i64);  // Bitwise NOT
+                self.current_type = Type::Int;
             },
             Token::Add => {
                 // Unary plus - doesn't change value
