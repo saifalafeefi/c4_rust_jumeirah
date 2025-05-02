@@ -481,100 +481,6 @@ impl<'a> Parser<'a> {
         // Function body
         self.expect(Token::LeftBrace, "Expected '{' to start function body")?;
         
-        // Parse local variable declarations
-        while self.token() == Token::Int || self.token() == Token::Char {
-            let base_type = if self.token() == Token::Int {
-                self.next();
-                Type::Int
-            } else {
-                self.next();
-                Type::Char
-            };
-            
-            // Parse local variables
-            while self.token() != Token::Semicolon {
-                let mut var_type = base_type.clone();
-                
-                // Parse pointer levels
-                while self.token() == Token::Mul {
-                    self.next();
-                    var_type = Type::Ptr(Box::new(var_type));
-                }
-                
-                // Parse variable name
-                if let Token::Id(id) = self.token() {
-                    let var_name = self.get_id_name(id);
-                    
-                    // Check for duplicate local
-                    if let Some(existing) = self.find_symbol(&var_name) {
-                        if existing.class == SymbolClass::Loc && existing.value >= param_count {
-                            return Err(format!("Line {}: Duplicate local variable '{}'", self.lexer.line(), var_name));
-                        }
-                        
-                        // Save old properties to restore later
-                        let old_class = existing.class;
-                        let old_type = existing.typ.clone();
-                        let old_value = existing.value;
-                        
-                        // Add as local variable
-                        self.add_symbol_with_history(
-                            &var_name,
-                            SymbolClass::Loc,
-                            var_type.clone(),
-                            self.locals as i64,
-                            Some(old_class),
-                            Some(old_type),
-                            Some(old_value),
-                        )?;
-                    } else {
-                        // Add as local variable
-                        self.add_symbol(
-                            &var_name,
-                            SymbolClass::Loc,
-                            var_type.clone(),
-                            self.locals as i64,
-                        )?;
-                    }
-                    
-                    self.locals += 1;
-                    self.next();
-
-                    // Check for initialization
-                    if self.token() == Token::Assign {
-                        self.next(); // Skip '='
-                        
-                        // Generate code to get the address of the local variable
-                        self.code.push(OpCode::LEA as i64);
-                        self.code.push((self.locals - 1) as i64);
-                        
-                        // Step 1: Save variable address for later
-                        self.code.push(OpCode::PSH as i64);
-                        
-                        // Step 2: Evaluate the initializer
-                        self.expr(0)?;
-                        
-                        // Step 3: Store value at the address
-                        if var_type == Type::Char {
-                            self.code.push(OpCode::SC as i64);
-                        } else {
-                            self.code.push(OpCode::SI as i64);
-                        }
-                    }
-                } else {
-                    return Err(format!("Line {}: Local variable name expected", self.lexer.line()));
-                }
-                
-                // Check for more variables
-                if self.token() == Token::Comma {
-                    self.next();
-                } else {
-                    break;
-                }
-            }
-            
-            self.expect(Token::Semicolon, "Expected ';' after local variable declaration")?;
-        }
-        
         // Calculate local stack space needed
         let local_offset = self.locals as i64 - param_count;
         
@@ -582,9 +488,110 @@ impl<'a> Parser<'a> {
         self.code.push(OpCode::ENT as i64);
         self.code.push(local_offset);
         
-        // Parse function body statements
+        println!("DEBUG PARSER: Function entry - creating stack frame with {} local variables", local_offset);
+        
+        // Parse local variable declarations and statements
         while self.token() != Token::RightBrace && self.token() != Token::Eof {
-            self.stmt()?;
+            // Check for local variable declarations at the beginning
+            if self.token() == Token::Int || self.token() == Token::Char {
+                let base_type = if self.token() == Token::Int {
+                    self.next();
+                    Type::Int
+                } else {
+                    self.next();
+                    Type::Char
+                };
+                
+                // Parse local variables
+                while self.token() != Token::Semicolon {
+                    let mut var_type = base_type.clone();
+                    
+                    // Parse pointer levels
+                    while self.token() == Token::Mul {
+                        self.next();
+                        var_type = Type::Ptr(Box::new(var_type));
+                    }
+                    
+                    // Parse variable name
+                    if let Token::Id(id) = self.token() {
+                        let var_name = self.get_id_name(id);
+                        
+                        // Check for duplicate local (except params)
+                        if let Some(existing) = self.find_symbol(&var_name) {
+                            if existing.class == SymbolClass::Loc && existing.value >= param_count {
+                                return Err(format!("Line {}: Duplicate local variable '{}'", self.lexer.line(), var_name));
+                            }
+                            
+                            // Save old properties to restore later
+                            let old_class = existing.class;
+                            let old_type = existing.typ.clone();
+                            let old_value = existing.value;
+                            
+                            // Add as local variable
+                            self.add_symbol_with_history(
+                                &var_name,
+                                SymbolClass::Loc,
+                                var_type.clone(),
+                                self.locals as i64,
+                                Some(old_class),
+                                Some(old_type),
+                                Some(old_value),
+                            )?;
+                        } else {
+                            // Add as local variable
+                            self.add_symbol(
+                                &var_name,
+                                SymbolClass::Loc,
+                                var_type.clone(),
+                                self.locals as i64,
+                            )?;
+                        }
+                        
+                        println!("DEBUG PARSER: Added local variable '{}' with offset {} (locals count = {})", 
+                               var_name, self.locals, self.locals);
+                                   
+                        self.locals += 1;
+                        self.next();
+                        
+                        // Check for initialization
+                        if self.token() == Token::Assign {
+                            println!("DEBUG PARSER: Initializing local variable '{}' at declaration", var_name);
+                            self.next(); // Skip '='
+                            
+                            // Generate code to get the address of the local variable
+                            self.code.push(OpCode::LEA as i64);
+                            self.code.push((self.locals - 1) as i64);
+                            
+                            // Step 1: Save variable address for later
+                            self.code.push(OpCode::PSH as i64);
+                            
+                            // Step 2: Evaluate the initializer
+                            self.expr(0)?;
+                            
+                            // Step 3: Store value at the address
+                            if var_type == Type::Char {
+                                self.code.push(OpCode::SC as i64);
+                            } else {
+                                self.code.push(OpCode::SI as i64);
+                            }
+                        }
+                    } else {
+                        return Err(format!("Line {}: Local variable name expected", self.lexer.line()));
+                    }
+                    
+                    // Check for more variables
+                    if self.token() == Token::Comma {
+                        self.next();
+                    } else {
+                        break;
+                    }
+                }
+                
+                self.expect(Token::Semicolon, "Expected ';' after local variable declaration")?;
+            } else {
+                // Parse statements
+                self.stmt()?;
+            }
         }
         
         // Ensure function has a return statement by adding LEV
@@ -924,6 +931,9 @@ impl<'a> Parser<'a> {
                         let sym_value = symbol.value;
                         let sym_type = symbol.typ.clone();
                         
+                        // Check if this is an assignment
+                        let is_assignment = self.token() == Token::Assign;
+                        
                         match sym_class {
                             SymbolClass::Num => {
                                 // Numeric constant
@@ -932,34 +942,84 @@ impl<'a> Parser<'a> {
                                 self.current_type = Type::Int;
                             },
                             SymbolClass::Glo => {
-                                // Global variable - push address
-                                self.code.push(OpCode::IMM as i64);
-                                self.code.push(sym_value);
-                                
-                                // Based on type, load value
-                                if sym_type == Type::Char {
-                                    self.code.push(OpCode::LC as i64);
+                                if is_assignment {
+                                    // Assignment to global variable
+                                    // Push address to store to
+                                    self.code.push(OpCode::IMM as i64);
+                                    self.code.push(sym_value);
+                                    
+                                    // Save the address for later
+                                    self.code.push(OpCode::PSH as i64);
+                                    
+                                    // Skip = token
+                                    self.next();
+                                    
+                                    // Evaluate the expression
+                                    self.expr(0)?;
+                                    
+                                    // Store the value
+                                    if sym_type == Type::Char {
+                                        self.code.push(OpCode::SC as i64);
+                                    } else {
+                                        self.code.push(OpCode::SI as i64);
+                                    }
                                 } else {
-                                    self.code.push(OpCode::LI as i64);
+                                    // Global variable access - push address
+                                    self.code.push(OpCode::IMM as i64);
+                                    self.code.push(sym_value);
+                                    
+                                    // Based on type, load value
+                                    if sym_type == Type::Char {
+                                        self.code.push(OpCode::LC as i64);
+                                    } else {
+                                        self.code.push(OpCode::LI as i64);
+                                    }
                                 }
                                 self.current_type = sym_type;
                             },
                             SymbolClass::Loc => {
-                                // Local variable - calculate address from bp
-                                self.code.push(OpCode::LEA as i64);
-                                self.code.push(sym_value);
-                                
-                                // Debug output for locals
-                                println!("DEBUG PARSER: Local variable '{}' at offset {}, generating LEA {}", 
-                                         name, sym_value, sym_value);
-                                
-                                // Load value
-                                if sym_type == Type::Char {
-                                    self.code.push(OpCode::LC as i64);
-                                    println!("DEBUG PARSER: Loading char value with LC");
+                                if is_assignment {
+                                    // Assignment to local variable
+                                    // Generate LEA to get the address
+                                    self.code.push(OpCode::LEA as i64);
+                                    self.code.push(sym_value);
+                                    
+                                    // Save the address for later
+                                    self.code.push(OpCode::PSH as i64);
+                                    
+                                    // Skip = token
+                                    self.next();
+                                    
+                                    // Evaluate the expression
+                                    self.expr(0)?;
+                                    
+                                    println!("DEBUG PARSER: Generating store for assignment to local '{}' with value in AX", name);
+                                    
+                                    // Store the value
+                                    if sym_type == Type::Char {
+                                        self.code.push(OpCode::SC as i64);
+                                        println!("DEBUG PARSER: Generated SC (store char)");
+                                    } else {
+                                        self.code.push(OpCode::SI as i64);
+                                        println!("DEBUG PARSER: Generated SI (store int)");
+                                    }
                                 } else {
-                                    self.code.push(OpCode::LI as i64);
-                                    println!("DEBUG PARSER: Loading int value with LI");
+                                    // Local variable - calculate address from bp
+                                    self.code.push(OpCode::LEA as i64);
+                                    self.code.push(sym_value);
+                                    
+                                    // Debug output for locals
+                                    println!("DEBUG PARSER: Local variable '{}' at offset {}, generating LEA {}", 
+                                             name, sym_value, sym_value);
+                                    
+                                    // Load value
+                                    if sym_type == Type::Char {
+                                        self.code.push(OpCode::LC as i64);
+                                        println!("DEBUG PARSER: Loading char value with LC");
+                                    } else {
+                                        self.code.push(OpCode::LI as i64);
+                                        println!("DEBUG PARSER: Loading int value with LI");
+                                    }
                                 }
                                 self.current_type = sym_type;
                             },
