@@ -9,6 +9,7 @@ pub enum Type {
     Char,
     Int,
     Ptr(Box<Type>),
+    Array(Box<Type>, usize),
 }
 
 impl Type {
@@ -16,9 +17,14 @@ impl Type {
         matches!(self, Type::Ptr(_))
     }
     
+    pub fn is_array(&self) -> bool {
+        matches!(self, Type::Array(_, _))
+    }
+    
     pub fn base_type(&self) -> Option<Box<Type>> {
         match self {
             Type::Ptr(base) => Some(base.clone()),
+            Type::Array(base, _) => Some(base.clone()),
             _ => None,
         }
     }
@@ -27,6 +33,7 @@ impl Type {
         match self {
             Type::Char => 1,
             Type::Int | Type::Ptr(_) => std::mem::size_of::<i64>(),
+            Type::Array(base, size) => base.size() * size,
         }
     }
 }
@@ -302,6 +309,23 @@ impl<'a> Parser<'a> {
                 let name = self.get_id_name(id);
                 self.next();
                 
+                // Check for array declaration
+                if self.token() == Token::LeftBracket {
+                    self.next(); // Skip '['
+                    
+                    // Get array size
+                    if let Token::Num(size) = self.token() {
+                        println!("DEBUG PARSER: Found array declaration with size {}", size);
+                        typ = Type::Array(Box::new(typ.clone()), size as usize);
+                        self.next(); // Skip size
+                    } else {
+                        return Err(format!("Line {}: Expected numeric array size", self.lexer.line()));
+                    }
+                    
+                    // Expect closing bracket
+                    self.expect(Token::RightBracket, "Expected ']' after array size")?;
+                }
+                
                 // Function definition
                 if self.token() == Token::LeftParen {
                     self.parse_function(name, typ)?;
@@ -516,6 +540,24 @@ impl<'a> Parser<'a> {
                     // Parse variable name
                     if let Token::Id(id) = self.token() {
                         let var_name = self.get_id_name(id);
+                        self.next();
+                        
+                        // Check for array declaration
+                        if self.token() == Token::LeftBracket {
+                            self.next(); // Skip '['
+                            
+                            // Get array size
+                            if let Token::Num(size) = self.token() {
+                                println!("DEBUG PARSER: Found local array declaration with size {}", size);
+                                var_type = Type::Array(Box::new(var_type.clone()), size as usize);
+                                self.next(); // Skip size
+                            } else {
+                                return Err(format!("Line {}: Expected numeric array size", self.lexer.line()));
+                            }
+                            
+                            // Expect closing bracket
+                            self.expect(Token::RightBracket, "Expected ']' after array size")?;
+                        }
                         
                         // Check for duplicate local (except params)
                         if let Some(existing) = self.find_symbol(&var_name) {
@@ -552,7 +594,6 @@ impl<'a> Parser<'a> {
                                var_name, self.locals, self.locals);
                                    
                         self.locals += 1;
-                        self.next();
                         
                         // Check for initialization
                         if self.token() == Token::Assign {
@@ -1419,19 +1460,19 @@ impl<'a> Parser<'a> {
         while self.precedence_of(self.token()) > precedence {
             let op = self.token();
             let op_type = self.current_type.clone(); // Save the LHS type for pointer arithmetic
-            println!("DEBUG: Found operator {:?} with precedence {}", op, self.precedence_of(op));
+            println!("DEBUG PARSER: Found operator {:?} with precedence {}", op, self.precedence_of(op));
             self.next();
             
             // Handle assignment specially
             if op == Token::Assign {
-                println!("DEBUG: Handling assignment operator");
+                println!("DEBUG PARSER: Handling assignment operator");
                 // For assignment, we need the LHS to be a loadable location
                 // Check if the last generated code is appropriate
                 if self.code.len() >= 1 {
                     let len = self.code.len();
                     let last_code = self.code[len-1] as usize;
                     
-                    println!("DEBUG: Checking assignment - last opcode: {:?}", last_code);
+                    println!("DEBUG PARSER: Checking assignment - last opcode: {:?}", last_code);
                     // If the last code is a load instruction (LI or LC), 
                     // pop it off and push a store instead after evaluating the RHS
                     if last_code == OpCode::LI as usize || last_code == OpCode::LC as usize {
@@ -1452,6 +1493,27 @@ impl<'a> Parser<'a> {
                         } else {
                             self.code.push(OpCode::SI as i64);
                             println!("DEBUG PARSER: Generated SI for int store");
+                        }
+                        continue;
+                    }
+                    // Array indexing case - the last instruction(s) should have calculated an address
+                    // but we didn't load from it yet because we saw the assignment coming
+                    else if last_code == OpCode::ADD as usize || last_code == OpCode::MUL as usize {
+                        println!("DEBUG PARSER: Assignment to array element detected");
+                        
+                        // Push the calculated address on the stack
+                        self.code.push(OpCode::PSH as i64);
+                        
+                        // Evaluate the right hand side
+                        self.expr(0)?;
+                        
+                        // Store to the calculated address
+                        if op_type == Type::Char {
+                            self.code.push(OpCode::SC as i64);
+                            println!("DEBUG PARSER: Generated SC for char array element");
+                        } else {
+                            self.code.push(OpCode::SI as i64);
+                            println!("DEBUG PARSER: Generated SI for int array element");
                         }
                         continue;
                     }
@@ -1590,12 +1652,15 @@ impl<'a> Parser<'a> {
                     },
                     // Handle array indexing
                     Token::LeftBracket => {
+                        println!("DEBUG PARSER: Handling array indexing with token LeftBracket");
+                        println!("DEBUG PARSER: Current type: {:?}, is_array: {}", op_type, op_type.is_array());
+                        
                         self.expr(0)?; // Parse index
                         self.expect(Token::RightBracket, "Expected ']' after array index")?;
                         
-                        // Make sure LHS is a pointer type
-                        if !op_type.is_ptr() {
-                            return Err(format!("Line {}: Array indexing requires a pointer", self.lexer.line()));
+                        // Make sure LHS is a pointer or array type
+                        if !op_type.is_ptr() && !op_type.is_array() {
+                            return Err(format!("Line {}: Array indexing requires a pointer or array type", self.lexer.line()));
                         }
                         
                         // Scale the index by the size of the base type
@@ -1604,21 +1669,27 @@ impl<'a> Parser<'a> {
                         
                         if let Some(base_type) = op_type.base_type() {
                             self.code.push(base_type.size() as i64);
-                        } else {
-                            return Err(format!("Line {}: Invalid pointer type in array indexing", self.lexer.line()));
-                        }
-                        
-                        self.code.push(OpCode::MUL as i64);
-                        self.code.push(OpCode::ADD as i64);
-                        
-                        // Load the value at the calculated address
-                        if let Some(base_type) = op_type.base_type() {
+                            
+                            // After scaling, add to base address
+                            self.code.push(OpCode::MUL as i64);
+                            self.code.push(OpCode::ADD as i64);
+                            
+                            // Update current type to the element type
                             self.current_type = (*base_type).clone();
                             
-                            if self.current_type == Type::Char {
-                                self.code.push(OpCode::LC as i64);
-                            } else {
-                                self.code.push(OpCode::LI as i64);
+                            // Check if this is part of an assignment (don't load)
+                            if self.token() != Token::Assign && 
+                               self.token() != Token::AddAssign && 
+                               self.token() != Token::SubAssign && 
+                               self.token() != Token::MulAssign && 
+                               self.token() != Token::DivAssign && 
+                               self.token() != Token::ModAssign {
+                                // Load the value at the calculated address
+                                if self.current_type == Type::Char {
+                                    self.code.push(OpCode::LC as i64);
+                                } else {
+                                    self.code.push(OpCode::LI as i64);
+                                }
                             }
                         } else {
                             return Err(format!("Line {}: Invalid pointer type in array indexing", self.lexer.line()));
@@ -1791,6 +1862,7 @@ impl<'a> Parser<'a> {
             Token::Shl | Token::Shr => 9,
             Token::Add | Token::Sub => 10,
             Token::Mul | Token::Div | Token::Mod => 11,
+            Token::LeftBracket => 12,  // Array indexing has higher precedence
             _ => 0,
         }
     }

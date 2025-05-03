@@ -53,7 +53,7 @@ pub enum Token {
     Mod,
     Inc,
     Dec,
-    Brak,
+    Brak,        // [ for array indexing
     
     // special chars
     Semicolon,
@@ -61,8 +61,8 @@ pub enum Token {
     RightBrace,
     LeftParen,
     RightParen,
-    LeftBracket,
-    RightBracket,
+    LeftBracket,  // [ for array declaration
+    RightBracket, // ]
     Comma,
     Colon,
     Tilde,
@@ -543,7 +543,10 @@ impl<'a> Lexer<'a> {
                             self.current_token = Token::Xor;
                         }
                     },
-                    '[' => self.current_token = Token::Brak,
+                    '[' => {
+                        println!("DEBUG LEXER: Found left bracket token at line {}", self.line);
+                        self.current_token = Token::LeftBracket;
+                    },
                     '?' => self.current_token = Token::Cond,
                     '~' => self.current_token = Token::Tilde,
                     ';' => self.current_token = Token::Semicolon,
@@ -551,7 +554,10 @@ impl<'a> Lexer<'a> {
                     '}' => self.current_token = Token::RightBrace,
                     '(' => self.current_token = Token::LeftParen,
                     ')' => self.current_token = Token::RightParen,
-                    ']' => self.current_token = Token::RightBracket,
+                    ']' => {
+                        println!("DEBUG LEXER: Found right bracket token at line {}", self.line);
+                        self.current_token = Token::RightBracket;
+                    },
                     ',' => self.current_token = Token::Comma,
                     ':' => self.current_token = Token::Colon,
                     
