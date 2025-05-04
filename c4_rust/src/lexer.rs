@@ -82,6 +82,7 @@ pub struct Lexer<'a> {
     current_value: i64,
     string_buffer: Vec<u8>,
     lp: usize, // for source printing
+    debug: bool, // debug flag
 }
 
 impl<'a> Lexer<'a> {
@@ -96,7 +97,13 @@ impl<'a> Lexer<'a> {
             current_value: 0,
             string_buffer: Vec::new(),
             lp: 0,
+            debug: false, // default to no debug output
         }
+    }
+    
+    /// sets debug flag
+    pub fn set_debug(&mut self, debug: bool) {
+        self.debug = debug;
     }
     
     /// gets current token
@@ -270,7 +277,9 @@ impl<'a> Lexer<'a> {
                             
                             self.current_value = start_pos as i64; // Value is start index
                             self.current_token = Token::Str(start_pos);
-                            println!("DEBUG LEXER: Found string literal at index {}", start_pos);
+                            if self.debug {
+                                println!("DEBUG LEXER: Found string literal at index {}", start_pos);
+                            }
                         } else {
                             // char literal - value is the ASCII code
                             if start_pos < self.string_buffer.len() {
@@ -295,7 +304,9 @@ impl<'a> Lexer<'a> {
                                 self.current_value = 0;
                             }
                             self.current_token = Token::Num(self.current_value);
-                            println!("DEBUG LEXER: Found char literal with value {}", self.current_value);
+                            if self.debug {
+                                println!("DEBUG LEXER: Found char literal with value {}", self.current_value);
+                            }
                         }
                     },
                     
@@ -566,7 +577,9 @@ impl<'a> Lexer<'a> {
                         }
                     },
                     '[' => {
-                        println!("DEBUG LEXER: Found left bracket token at line {}", self.line);
+                        if self.debug {
+                            println!("DEBUG LEXER: Found left bracket token at line {}", self.line);
+                        }
                         self.current_token = Token::LeftBracket;
                     },
                     '?' => self.current_token = Token::Cond,
@@ -577,7 +590,9 @@ impl<'a> Lexer<'a> {
                     '(' => self.current_token = Token::LeftParen,
                     ')' => self.current_token = Token::RightParen,
                     ']' => {
-                        println!("DEBUG LEXER: Found right bracket token at line {}", self.line);
+                        if self.debug {
+                            println!("DEBUG LEXER: Found right bracket token at line {}", self.line);
+                        }
                         self.current_token = Token::RightBracket;
                     },
                     ',' => self.current_token = Token::Comma,

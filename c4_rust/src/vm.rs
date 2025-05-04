@@ -53,41 +53,31 @@ impl VM {
         // Initialize PC, SP, BP
         self.pc = 0;
         
-        // Extra debug info about initial memory state
-        if self.debug {
-            println!("DEBUG VM: Init - Stack size: {}, SP: {}, BP: {}", 
-                 self.stack.len(), self.sp, self.bp);
-        }
-        
-        // Debug helper: dump stack contents before we start
-        self.dump_stack(0, 10);
-        
+        // Set cycle counter
         self.cycle = 0;
-        let max_cycles = 50000; // Increase limit significantly
+        let max_cycles = 50000; // Instruction limit to prevent infinite loops
         
-        // Execute main function at position 0
+        // Main execution loop - run until EXIT or end of code
         while self.pc < self.code.len() {
-            // Check for max cycles to prevent infinite loops
+            // Check cycle limit to avoid infinite loops
             if self.cycle >= max_cycles {
-                println!("WARNING: Maximum instruction limit ({}) reached - possible infinite loop", max_cycles);
                 return Err(format!("Execution aborted after {} instructions - possible infinite loop", max_cycles));
             }
             
+            // Get current opcode
             let op_addr = self.pc;
             let op = self.code[self.pc] as u8;
-            self.pc += 1;
+            self.pc += 1; // Move past opcode
             
-            println!("VM LOOP: Processing Opcode {} ({}) at Addr {}", self.op_to_string(op as usize), op, op_addr);
-            
-            // Argument fetching moved inside handlers
-            
-            if self.debug { // Use the VM's debug flag
-                // Pass the optional argument to the debug printer
-                // self.print_debug_info(op as usize, op_addr, None); // Arg fetching moved
+            // Optional debug output
+            if self.debug {
+                println!("VM LOOP: Processing Opcode {} ({}) at Addr {}", self.op_to_string(op as usize), op, op_addr);
             }
             
+            // Increment cycle counter
             self.cycle += 1;
             
+            // Execute the instruction
             match op {
                 // LEA: Load effective address
                 op if op == OpCode::LEA as u8 => {
@@ -95,33 +85,13 @@ impl VM {
                     self.pc += 1; // Consume argument
                     
                     // Calculate effective address for a local variable
-                    // In C4, local variables are stored at positions below BP:
-                    // bp - 1: first local var
-                    // bp - 2: second local var, etc.
                     let addr = self.bp - offset;
-                    println!("VM DEBUG: LEA - Local var offset {} => address {} (bp={})", offset, addr, self.bp);
                     
-                    // IMPORTANT: Dump stack around the address for debugging arrays
-                    self.dump_stack(addr.saturating_sub(5), 10);
+                    if self.debug {
+                        println!("VM DEBUG: LEA - Local var offset {} => address {} (bp={})", offset, addr, self.bp);
+                    }
                     
                     self.ax = addr as i64;
-
-                    if self.debug {
-                        println!("DEBUG VM: LEA - Local var offset {} => stack addr {} (bp={})", 
-                                offset, addr, self.bp);
-                                
-                        // Show current stack state around this address
-                        let start = addr.saturating_sub(2);
-                        let end = (addr + 3).min(self.stack.len());
-                        println!("DEBUG VM: Stack state around address {}:", addr);
-                        for i in start..end {
-                            println!("  stack[{}] = {} {}", i, self.stack[i], 
-                                    if i == addr { "<<< Variable address" } 
-                                    else if i == self.bp { "<-- BP" }
-                                    else if i == self.sp { "<-- SP" }
-                                    else { "" });
-                        }
-                    }
                 },
                 
                 // IMM: Load immediate value
@@ -173,18 +143,23 @@ impl VM {
                 op if op == OpCode::ENT as u8 => {
                     let local_size = self.code[op_addr + 1] as usize;
                     self.pc += 1; // Consume argument
-                    println!("DEBUG VM: ENT - Creating stack frame with {} local variables", local_size);
-                    println!("DEBUG VM: ENT - Old BP: {}, Old SP: {}", self.bp, self.sp);
                     
-                    // Debug: dump stack before creating stack frame
-                    println!("Stack before function entry:");
-                    let dump_start = self.sp.saturating_sub(5);
-                    self.dump_stack(dump_start, 10);
+                    if self.debug {
+                        println!("DEBUG VM: ENT - Creating stack frame with {} local variables", local_size);
+                        println!("DEBUG VM: ENT - Old BP: {}, Old SP: {}", self.bp, self.sp);
+                        
+                        // Debug: dump stack before creating stack frame
+                        println!("Stack before function entry:");
+                        let dump_start = self.sp.saturating_sub(5);
+                        self.dump_stack(dump_start, 10);
+                    }
                     
                     // Push old base pointer
                     if self.sp < 2 {
                         // Grow the stack if needed
-                        println!("DEBUG VM: ENT - Growing stack to accommodate base pointer");
+                        if self.debug {
+                            println!("DEBUG VM: ENT - Growing stack to accommodate base pointer");
+                        }
                         let new_size = self.stack.len() + 64;
                         self.stack.resize(new_size, 0);
                     }
@@ -201,8 +176,10 @@ impl VM {
                     let buffer_size = if local_size <= 1 { 4 } else { local_size * 2 };
                     let total_space = local_size + buffer_size;
                     
-                    println!("DEBUG VM: ENT - Allocating {} locals with {} buffer slots (total: {})", 
-                             local_size, buffer_size, total_space);
+                    if self.debug {
+                        println!("DEBUG VM: ENT - Allocating {} locals with {} buffer slots (total: {})", 
+                                 local_size, buffer_size, total_space);
+                    }
                     
                     // Make sure we have enough stack space
                     if self.sp < total_space + 1 {
@@ -234,15 +211,17 @@ impl VM {
                         self.stack[i] = 0;
                     }
                     
-                    println!("DEBUG VM: ENT - New BP: {}, New SP: {} (added {} buffer slots)", 
-                            self.bp, self.sp, buffer_size);
-                    println!("DEBUG VM: ENT - Reserved space from {} to {}", self.sp, self.bp - 1);
-                    
-                    // Debug: dump stack after creating stack frame
-                    println!("Stack after function entry:");
-                    let dump_start = self.sp.saturating_sub(2);
-                    let dump_count = (self.bp - self.sp + 5).min(20);
-                    self.dump_stack(dump_start, dump_count);
+                    if self.debug {
+                        println!("DEBUG VM: ENT - New BP: {}, New SP: {} (added {} buffer slots)", 
+                                self.bp, self.sp, buffer_size);
+                        println!("DEBUG VM: ENT - Reserved space from {} to {}", self.sp, self.bp - 1);
+                        
+                        // Debug: dump stack after creating stack frame
+                        println!("Stack after function entry:");
+                        let dump_start = self.sp.saturating_sub(2);
+                        let dump_count = (self.bp - self.sp + 5).min(20);
+                        self.dump_stack(dump_start, dump_count);
+                    }
                 },
                 
                 // ADJ: Adjust stack
@@ -267,55 +246,47 @@ impl VM {
                 
                 // LEV: Leave function
                 op if op == OpCode::LEV as u8 => {
-                    println!("DEBUG VM: LEV - Leaving function with SP={}, BP={}", self.sp, self.bp);
+                    // Safety checks
+                    if self.bp >= self.stack.len() {
+                        if self.debug {
+                            println!("ERROR: LEV - Invalid BP value: {}", self.bp);
+                        }
+                        return Err("Stack corruption - invalid base pointer".to_string());
+                    }
+
+                    // Clean up stack frame
+                    let sp = self.bp;
                     
-                    // Perform bounds checking
-                    if self.sp >= self.stack.len() || self.bp >= self.stack.len() {
-                        println!("WARNING: Stack pointers out of bounds during LEV - SP={}, BP={}, Stack Size={}", 
-                                self.sp, self.bp, self.stack.len());
-                        // Return safely rather than crashing
-                        return Ok(self.ax);
+                    // Bounds check for stack access
+                    if sp + 1 >= self.stack.len() {
+                        if self.debug {
+                            println!("ERROR: LEV - Stack frame too small, can't read return address");
+                        }
+                        return Err("Stack corruption - can't read return address".to_string());
                     }
                     
-                    // Restore base pointer and stack pointer
-                    self.sp = self.bp;
-                    if self.sp >= self.stack.len() {
-                        println!("WARNING: Invalid base pointer during LEV: BP={}", self.bp);
-                        return Ok(self.ax);
+                    let bp = self.stack[sp];
+                    let pc = self.stack[sp + 1];
+                    
+                    if self.debug {
+                        println!("DEBUG VM: LEV - Leaving function with SP={}, BP={}", self.sp, self.bp);
+                        println!("              - Return address: PC={}, new BP={}", pc, bp);
                     }
                     
-                    self.bp = self.stack[self.sp] as usize;
+                    self.sp = sp + 2; // Remove frame
+                    self.bp = bp as usize;
                     
-                    // Avoid unsigned integer overflow when incrementing SP
-                    if self.sp < self.stack.len() - 1 {
-                        self.sp += 1;
-                    } else {
-                        println!("WARNING: Stack pointer at limit during LEV");
-                        return Ok(self.ax);
-                    }
-                    
-                    // Check for return from main
-                    if self.sp >= self.stack.len() || (self.sp == self.stack.len() - 1) {
+                    // Check if we're returning from main
+                    if pc == 0 || bp == 0 {
                         if self.debug {
                             println!("  LEV: returning from main function with value {}", self.ax);
                         }
+                        // Return from main function - exit program
                         return Ok(self.ax);
                     }
                     
-                    // Safely restore the program counter
-                    if self.sp >= self.stack.len() {
-                        println!("WARNING: Invalid stack pointer when restoring PC: SP={}", self.sp);
-                        return Ok(self.ax);
-                    }
-                    
-                    self.pc = self.stack[self.sp] as usize;
-                    
-                    // Final stack pointer adjustment
-                    if self.sp < self.stack.len() - 1 {
-                        self.sp += 1;
-                    } else {
-                        println!("WARNING: Stack pointer at limit during PC restore");
-                    }
+                    // Continue execution at return address
+                    self.pc = pc as usize;
                 },
                 
                 // load int
@@ -329,16 +300,20 @@ impl VM {
                         }
                         let bytes = self.data[addr..addr + std::mem::size_of::<i64>()].try_into().unwrap();
                         self.ax = i64::from_ne_bytes(bytes);
-                        println!("VM DEBUG: LI - Loaded int {} from data address {}", self.ax, addr);
+                        if self.debug {
+                            println!("VM DEBUG: LI - Loaded int {} from data address {}", self.ax, addr);
+                        }
                     } else {
                         // Load from stack
                         if addr >= self.stack.len() {
                             return Err(format!("Stack read out of bounds: addr={}, size={}", addr, self.stack.len()));
                         }
                         self.ax = self.stack[addr];
-                        println!("VM DEBUG: LI - Loaded int {} from stack address {}", self.ax, addr);
-                        // Print stack around the loaded address to help debug array issues
-                        self.dump_stack(addr.saturating_sub(3), 6);
+                        if self.debug {
+                            println!("VM DEBUG: LI - Loaded int {} from stack address {}", self.ax, addr);
+                            // Print stack around the loaded address to help debug array issues
+                            self.dump_stack(addr.saturating_sub(3), 6);
+                        }
                     }
                     
                     self.cycle += 1;
@@ -366,37 +341,64 @@ impl VM {
                 
                 // SI: Store int
                 op if op == OpCode::SI as u8 => {
-                    // Pop the address from the stack
+                    // Check if we need to read the stack
                     if self.sp >= self.stack.len() {
                         return Err(format!("Stack empty in SI: sp={}", self.sp));
                     }
-                    let raw_addr_from_stack = self.stack[self.sp];
-                    println!("VM SI HANDLER: Reading address {} from stack[{}]", raw_addr_from_stack, self.sp);
-                    let addr = self.stack[self.sp] as usize;
-                    self.sp += 1;
-                    let value_to_store = self.ax; // Get value from ax (RHS)
                     
-                    println!("VM SI HANDLER: Checking addr {} < DATA_STACK_THRESHOLD {}", addr, DATA_STACK_THRESHOLD);
-
+                    // Get address from top of stack
+                    let raw_addr_from_stack = self.stack[self.sp];
+                    self.sp += 1; // Pop address
+                    
+                    // Print debug info
+                    if self.debug {
+                        println!("VM SI HANDLER: Reading address {} from stack[{}]", raw_addr_from_stack, self.sp - 1);
+                        println!("VM SI HANDLER: Checking addr {} < DATA_STACK_THRESHOLD {}", 
+                                raw_addr_from_stack as usize, DATA_STACK_THRESHOLD);
+                    }
+                    
+                    // Convert the address to usize
+                    let addr = raw_addr_from_stack as usize;
+                    
+                    // Get value to store from accumulator
+                    let value_to_store = self.ax;
+                    
+                    // Store in appropriate segment based on address range
                     if addr < DATA_STACK_THRESHOLD {
-                        // Store to data segment
-                        let required_size = addr + std::mem::size_of::<i64>();
-                        if required_size > self.data.len() {
-                           self.data.resize(required_size, 0);
-                           println!("DEBUG VM: SI - Resized data segment to {} for address {}", self.data.len(), addr);
+                        // Store in data segment (for static data)
+                        if addr + std::mem::size_of::<i64>() > self.data.len() {
+                            // Resize the data segment to accommodate the new value
+                            let new_size = addr + std::mem::size_of::<i64>() + 64;
+                            if self.debug {
+                                println!("DEBUG VM: SI - Resized data segment to {} for address {}", new_size, addr);
+                            }
+                            self.data.resize(new_size, 0);
                         }
-                        self.data[addr..required_size].copy_from_slice(&value_to_store.to_ne_bytes());
-                        println!("DEBUG VM: SI - Stored int {} to stack address {}", value_to_store, addr);
-                        println!("DEBUG VM: SI - Stored int {} to data address {}", value_to_store, addr);
+                        
+                        // Store value as bytes in data segment
+                        let bytes = value_to_store.to_ne_bytes();
+                        for i in 0..std::mem::size_of::<i64>() {
+                            self.data[addr + i] = bytes[i];
+                        }
+                        if self.debug {
+                            println!("DEBUG VM: SI - Stored int {} to data address {}", value_to_store, addr);
+                        }
                     } else {
-                         // Store to stack
+                        // Store in stack
                         if addr >= self.stack.len() {
-                            let new_size = addr + 64; // Add buffer
-                            println!("DEBUG VM: SI - Growing stack from {} to {} for address {}", self.stack.len(), new_size, addr);
+                            // Grow the stack to accommodate the address
+                            let new_size = addr + 64;
+                            if self.debug {
+                                println!("DEBUG VM: SI - Growing stack from {} to {} for address {}", self.stack.len(), new_size, addr);
+                            }
                             self.stack.resize(new_size, 0);
                         }
+                        
+                        // Store directly in stack as i64
                         self.stack[addr] = value_to_store;
-                        // println!("DEBUG VM: SI - Stored int {} to stack address {}", value_to_store, addr); // Reduced noise
+                        if self.debug {
+                            println!("DEBUG VM: SI - Stored int {} to stack address {}", value_to_store, addr);
+                        }
                     }
                     
                     self.cycle += 1;
@@ -438,7 +440,9 @@ impl VM {
                     // Check if we need to grow/protect the stack
                     if self.sp == 0 {
                         // Grow the stack if needed
-                        println!("DEBUG VM: PSH - Growing stack to accommodate more pushes");
+                        if self.debug {
+                            println!("DEBUG VM: PSH - Growing stack to accommodate more pushes");
+                        }
                         let new_size = self.stack.len() + 64;
                         let mut new_stack = vec![0; new_size];
                         
@@ -455,7 +459,9 @@ impl VM {
                     
                     // Now push the value safely
                     self.sp = self.sp.saturating_sub(1);
-                    println!("DEBUG VM: PSH - Pushing {} onto stack at position {}", self.ax, self.sp);
+                    if self.debug {
+                        println!("DEBUG VM: PSH - Pushing {} onto stack at position {}", self.ax, self.sp);
+                    }
                     self.stack[self.sp] = self.ax;
                 },
                 
@@ -562,20 +568,12 @@ impl VM {
                     let argc = self.code[op_addr + 1] as usize;
                     self.pc += 1; // Consume argument
 
-                    /*
+                    // Debug info for PRTF call
                     if self.debug {
                         println!("DEBUG VM: PRTF - Called with {} arguments", argc);
-                        println!("DEBUG VM: PRTF - Stack state at entry:");
-                        for i in 0..argc {
-                            if self.sp + i < self.stack.len() {
-                                println!("  Arg {}: {} at stack[{}]", i, self.stack[self.sp + i], self.sp + i);
-                            }
-                        }
                     }
-                    */
                     
                     // Create a temporary slice reference to the arguments for easier access
-                    // This matches the original C4's `t = sp + pc[1]` approach
                     let t: &[i64] = &self.stack[self.sp..self.sp + argc];
                     
                     // First argument is the format string address
@@ -583,7 +581,9 @@ impl VM {
                     
                     // Bounds check
                     if format_addr >= self.data.len() {
-                        println!("ERROR: Invalid format string address: {}", format_addr);
+                        if self.debug {
+                            println!("ERROR: Invalid format string address: {}", format_addr);
+                        }
                         print!("<invalid format string>");
                         std::io::stdout().flush().unwrap();
                         
@@ -592,7 +592,7 @@ impl VM {
                         
                         // Set return value to 0 for error
                         self.ax = 0;
-                        return Ok(0);
+                        continue; // Skip the rest of the loop body
                     }
                     
                     // Read format string from data segment
@@ -605,43 +605,7 @@ impl VM {
                     
                     // Show the format string contents clearly for debugging
                     if self.debug {
-                        println!("DEBUG VM: PRTF - Format string: \"{}\" (raw bytes: {:?})", 
-                              format_str, format_str.as_bytes());
-                    }
-                    
-                    // Count the format specifiers
-                    let mut format_spec_count = 0;
-                    let mut skip_next = false;
-                    
-                    for i in 0..format_str.len() {
-                        if skip_next {
-                            skip_next = false;
-                            continue;
-                        }
-                        
-                        if i + 1 < format_str.len() {
-                            let c = format_str.chars().nth(i).unwrap();
-                            let next_c = format_str.chars().nth(i + 1).unwrap();
-                            
-                            if c == '%' {
-                                if next_c == '%' {
-                                    // %% is an escaped % character
-                                    skip_next = true;
-                                } else if next_c == 'd' || next_c == 's' {
-                                    // %d or %s is a format specifier
-                                    format_spec_count += 1;
-                                    skip_next = true;
-                                }
-                            }
-                        }
-                    }
-                    
-                    if self.debug {
-                        println!("DEBUG VM: PRTF - Found {} format specifiers", format_spec_count);
-                        if format_spec_count + 1 != argc {
-                            println!("DEBUG VM: PRTF - WARNING: Format specifiers count ({}) + 1 doesn't match argument count ({})",
-                                   format_spec_count, argc);
-                        }
+                        println!("DEBUG VM: PRTF - Format string: \"{}\"", format_str);
                     }
                     
                     // Process format string
@@ -651,24 +615,15 @@ impl VM {
                     let mut i = 0;
 
                     while i < format_chars.len() {
-                        let c = format_chars[i]; // Safe access
+                        let c = format_chars[i];
 
                         if c == '%' && i + 1 < format_chars.len() {
-                            let next_c = format_chars[i + 1]; // Safe access
+                            let next_c = format_chars[i + 1];
                             match next_c {
                                 'd' => {
                                     // Integer format
                                     if arg_idx < argc - 1 {
-                                        // Get the value directly from the arg stack 
-                                        // t[-2] is first arg, t[-3] is second, etc.
                                         let arg_val = t[argc - 2 - arg_idx];
-                                        
-                                        if self.debug {
-                                            println!("DEBUG VM: PRTF - %d argument {} = {} (t[-{}])", 
-                                                    arg_idx, arg_val, 2 + arg_idx);
-                                        }
-                                        
-                                        // Format the integer
                                         result.push_str(&arg_val.to_string());
                                         arg_idx += 1;
                                     } else {
@@ -682,36 +637,23 @@ impl VM {
                                         // Get string address from arg stack
                                         let str_addr = t[argc - 2 - arg_idx] as usize;
                                         
-                                        // Determine if address is data or stack
+                                        // Read from data segment
                                         if str_addr < DATA_STACK_THRESHOLD {
-                                            // Read from data segment
-                                            if self.debug {
-                                                 println!("DEBUG VM: PRTF - %s reading from data address {}", str_addr);
-                                            }
                                             let mut j = str_addr;
                                             while j < self.data.len() && self.data[j] != 0 {
                                                 result.push(self.data[j] as char);
                                                 j += 1;
                                             }
-                                            if j == self.data.len() && self.data.last() != Some(&0) {
-                                                println!("Warning: PRTF %s reached end of data without null terminator at addr {}", str_addr);
-                                            }
                                         } else {
                                             // Read from stack segment
-                                            if self.debug {
-                                                 println!("DEBUG VM: PRTF - %s reading from stack address {}", str_addr);
-                                            }
                                             let mut stack_idx = str_addr;
                                             while stack_idx < self.stack.len() {
-                                                 let char_byte = (self.stack[stack_idx] & 0xFF) as u8;
-                                                 if char_byte == 0 {
-                                                     break;
-                                                 }
-                                                 result.push(char_byte as char);
-                                                 stack_idx += 1; // Move to the next i64 slot for the next char
-                                             }
-                                            if stack_idx == self.stack.len() {
-                                                println!("Warning: PRTF %s reached end of stack without null terminator at addr {}", str_addr);
+                                                let char_byte = (self.stack[stack_idx] & 0xFF) as u8;
+                                                if char_byte == 0 {
+                                                    break;
+                                                }
+                                                result.push(char_byte as char);
+                                                stack_idx += 1;
                                             }
                                         }
                                         arg_idx += 1;
@@ -742,11 +684,6 @@ impl VM {
                     print!("{}", result);
                     std::io::stdout().flush().unwrap();
                     
-                    if self.debug {
-                        println!();
-                        println!("DEBUG VM: PRTF - Formatted output: \"{}\"", result);
-                    }
-                    
                     // Clean up stack
                     self.sp += argc;
                     
@@ -768,26 +705,32 @@ impl VM {
                     self.ax = self.syscall_memcmp()?;
                 },
                 op if op == OpCode::EXIT as u8 => {
-                    if self.debug {
-                        println!("exit({}) cycle = {}", self.stack[self.sp], self.cycle);
+                    // Check for valid stack access
+                    if self.sp >= self.stack.len() {
+                        if self.debug {
+                            println!("ERROR: EXIT - Invalid stack pointer: {}", self.sp);
+                        }
+                        return Err("Stack corruption on EXIT - invalid stack pointer".to_string());
                     }
-                    return Ok(self.stack[self.sp]);
+                    
+                    let exit_code = self.stack[self.sp];
+                    
+                    if self.debug {
+                        println!("exit({}) cycle = {}", exit_code, self.cycle);
+                    }
+                    return Ok(exit_code);
                 },
                 
-                // unknown op
+                // Unknown opcode - error out
                 _ => return Err(format!("unknown instruction: {}", op)),
             }
         }
         
-        // reached end without EXIT
+        // If code reached end without EXIT, return AX value
         if self.debug {
-            println!("program reached end, returning value {} after {} cycles", self.ax, self.cycle);
+            println!("Program reached end without EXIT instruction. AX = {}", self.ax);
         }
-        
-        // return final value
-        self.sp -= 1;
-        self.stack[self.sp] = self.ax;
-        Ok(self.stack[self.sp])
+        Ok(self.ax)
     }
     
     /// print debug info
@@ -1005,6 +948,10 @@ impl VM {
     
     /// debug helper to print stack
     fn dump_stack(&self, start: usize, count: usize) {
+        if !self.debug {
+            return; // Don't print stack dump if not in debug mode
+        }
+        
         println!("==== STACK DUMP ====");
         println!("SP: {}, BP: {}, PC: {}", self.sp, self.bp, self.pc);
         

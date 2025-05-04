@@ -57,17 +57,41 @@ cargo build --release
 ## Usage
 
 ```bash
-# Run in debug mode
-cargo run -- [options] <input-file>
+# Run in normal mode (clean output)
+cargo run <input-file>
+
+# Run with debug mode to see detailed execution information
+cargo run -- -d <input-file>
+
+# Run with source and assembly output
+cargo run -- -s <input-file>
 
 # Or use the compiled binary directly
-./target/debug/c4_rust [options] <input-file>
+./target/debug/c4_rust <input-file>
+./target/debug/c4_rust -d <input-file>
+./target/debug/c4_rust -s <input-file>
 ```
 
-Options:
-- `-s`: Print source and assembly
-- `-d`: Print executed instructions
-- `input-file`: C source file to compile
+### Command-Line Options
+
+- `-d`: Debug mode - print detailed execution information including parser debug info, VM instruction traces and memory operation details
+- `-s`: Source mode - print parsed source and generated assembly
+- `<input-file>`: C source file to compile and run
+
+### Example Programs
+
+The project includes several example C programs that can be used to test the compiler:
+
+```bash
+# Run a simple "Hello, World!" program
+cargo run single_variable_test.c
+
+# Run a more complex test
+cargo run complex_test.c
+
+# Run with debug information
+cargo run -- -d single_variable_test.c
+```
 
 ## Example
 

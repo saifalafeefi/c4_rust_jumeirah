@@ -79,11 +79,12 @@ pub struct Parser<'a> {
     current_type: Type,
     locals: usize,
     _src: bool, // source printing flag (renamed with underscore to indicate unused)
+    debug: bool, // debug flag
 }
 
 impl<'a> Parser<'a> {
     /// create a new parser
-    pub fn new(source: &'a str, src: bool) -> Self {
+    pub fn new(source: &'a str, src_or_debug: bool) -> Self {
         let mut data = Vec::new();
         
         // Add a test string at the beginning of the data segment
@@ -99,14 +100,18 @@ impl<'a> Parser<'a> {
             data.push(0);
         }
         
+        let mut lexer = Lexer::new(source);
+        lexer.set_debug(src_or_debug); // Pass debug flag to lexer
+        
         Parser {
-            lexer: Lexer::new(source),
+            lexer,
             symbols: Vec::new(),
             code: Vec::new(),
             data,
             current_type: Type::Int,
             locals: 0,
-            _src: src,
+            _src: src_or_debug,
+            debug: src_or_debug, // Pass the src flag as debug flag too
         }
     }
     
@@ -233,7 +238,9 @@ impl<'a> Parser<'a> {
             if (line >= 55 && line <= 61) || line == 73 {
                 // These lines contain complex printf with string indexing or bit shifts in c4.c
                 // We'll skip them for self-hosting compatibility
-                println!("Warning: Line {}: Special handling for complex code in c4.c - skipping", line);
+                if self.debug {
+                    println!("Warning: Line {}: Special handling for complex code in c4.c - skipping", line);
+                }
                 
                 // Skip to the next statement or line
                 while self.token() != Token::Eof {
@@ -255,10 +262,12 @@ impl<'a> Parser<'a> {
         }
         
         // Debug: Print all symbols in the table
-        println!("Symbol table contents:");
-        for sym in &self.symbols {
-            println!("Symbol: {}, Class: {:?}, Type: {:?}, Value: {}", 
-                    sym.name, sym.class, sym.typ, sym.value);
+        if self.debug {
+            println!("Symbol table contents:");
+            for sym in &self.symbols {
+                println!("Symbol: {}, Class: {:?}, Type: {:?}, Value: {}", 
+                        sym.name, sym.class, sym.typ, sym.value);
+            }
         }
         
         // Find main function
@@ -315,7 +324,9 @@ impl<'a> Parser<'a> {
                     
                     // Get array size
                     if let Token::Num(size) = self.token() {
-                        println!("DEBUG PARSER: Found array declaration with size {}", size);
+                        if self.debug {
+                            println!("DEBUG PARSER: Found array declaration with size {}", size);
+                        }
                         typ = Type::Array(Box::new(typ.clone()), size as usize);
                         self.next(); // Skip size
                     } else {
@@ -343,7 +354,9 @@ impl<'a> Parser<'a> {
                 
                 // Add symbol to table with proper type
                 self.add_symbol(&name, SymbolClass::Glo, typ, aligned_data_len as i64)?;
-                println!("DEBUG PARSER: Added global var '{}' of type {:?} at data address {}", name, self.symbols.last().unwrap().typ, aligned_data_len);
+                if self.debug {
+                    println!("DEBUG PARSER: Added global var '{}' of type {:?} at data address {}", name, self.symbols.last().unwrap().typ, aligned_data_len);
+                }
                 
                 // Add space in data segment
                 self.data.resize(aligned_data_len + type_size, 0);
@@ -519,7 +532,11 @@ impl<'a> Parser<'a> {
         self.code.push(OpCode::ENT as i64);
         self.code.push(local_offset);
         
-        println!("DEBUG PARSER: Function entry - creating stack frame with {} local variables", local_offset);
+        if self.debug {
+            println!("DEBUG PARSER: Function entry - creating stack frame with {} local variables", local_offset);
+        }
+        
+        // Parse local variable declarations and statements
         
         // Parse local variable declarations and statements
         while self.token() != Token::RightBrace && self.token() != Token::Eof {
@@ -554,7 +571,9 @@ impl<'a> Parser<'a> {
                             
                             // Get array size
                             if let Token::Num(size) = self.token() {
-                                println!("DEBUG PARSER: Found local array declaration with size {}", size);
+                                if self.debug {
+                                    println!("DEBUG PARSER: Found array declaration with size {}", size);
+                                }
                                 var_type = Type::Array(Box::new(var_type.clone()), size as usize);
                                 self.next(); // Skip size
                             } else {
@@ -596,14 +615,19 @@ impl<'a> Parser<'a> {
                             )?;
                         }
                         
-                        println!("DEBUG PARSER: Added local variable '{}' with offset {} (locals count = {})", 
-                               var_name, self.locals, self.locals);
+                        // Debug output for locals
+                        if self.debug {
+                            println!("DEBUG PARSER: Local variable '{}' at offset {}, generating LEA {}", 
+                                     var_name, self.locals, self.locals);
+                        }
                                    
                         self.locals += 1;
                         
                         // Check for initialization
                         if self.token() == Token::Assign {
-                            println!("DEBUG PARSER: Initializing local variable '{}' at declaration", var_name);
+                            if self.debug {
+                                println!("DEBUG PARSER: Initializing local variable '{}' at declaration", var_name);
+                            }
                             self.next(); // Skip '='
                             
                             // Generate code to get the address of the local variable
@@ -619,10 +643,14 @@ impl<'a> Parser<'a> {
                             // Step 3: Store value at the address
                             if var_type == Type::Char {
                                 self.code.push(OpCode::SC as i64);
-                                println!("DEBUG PARSER: Generated SC for local char initialization");
+                                if self.debug {
+                                    println!("DEBUG PARSER: Generated SC for local char initialization");
+                                }
                             } else {
                                 self.code.push(OpCode::SI as i64);
-                                println!("DEBUG PARSER: Generated SI for local int initialization");
+                                if self.debug {
+                                    println!("DEBUG PARSER: Generated SI for local int initialization");
+                                }
                             }
                         }
                     } else {
@@ -769,9 +797,11 @@ impl<'a> Parser<'a> {
     
     /// parse an expression with a given precedence level
     fn expr(&mut self, precedence: u8) -> Result<(), String> {
-        // Add debug output to trace expr calls
-        println!("DEBUG: expr called with precedence {}, token: {:?}, line: {}", 
-                 precedence, self.token(), self.lexer.line());
+        // Debug output to trace expr calls
+        if self.debug {
+            println!("DEBUG: expr called with precedence {}, token: {:?}, line: {}", 
+                     precedence, self.token(), self.lexer.line());
+        }
         
         // Primary expression parsing
         match self.token() {
@@ -790,12 +820,14 @@ impl<'a> Parser<'a> {
                 let string_content = &self.lexer.string_buffer()[start_pos_in_buffer..];
                 let string_len = string_content.iter().position(|&c| c == 0).unwrap_or(string_content.len());
                 let string_slice = &string_content[..string_len];
-                println!(
-                    "DEBUG PARSER: String literal starting at buffer index {}, value: \"{}\"",
-                    start_pos_in_buffer,
-                    String::from_utf8_lossy(string_slice)
-                );
-                println!("DEBUG PARSER: Storing string at data segment position: {}", str_start);
+                if self.debug {
+                    println!(
+                        "DEBUG PARSER: String literal starting at buffer index {}, value: \"{}\"",
+                        start_pos_in_buffer,
+                        String::from_utf8_lossy(string_slice)
+                    );
+                    println!("DEBUG PARSER: Storing string at data segment position: {}", str_start);
+                }
                 
                 // Copy the string data (including null terminator) into the data segment
                 self.data.extend_from_slice(string_slice);
@@ -809,7 +841,9 @@ impl<'a> Parser<'a> {
                 // Push immediate value (address of the string in data segment)
                 self.code.push(OpCode::IMM as i64);
                 self.code.push(str_start as i64);
-                println!("DEBUG PARSER: Generated IMM {} for string address", str_start);
+                if self.debug {
+                    println!("DEBUG PARSER: Generated IMM {} for string address", str_start);
+                }
                 self.next();
                 
                 // Handle multiple consecutive string literals (C concatenation feature)
@@ -841,7 +875,10 @@ impl<'a> Parser<'a> {
                 
                 self.expect(Token::RightParen, "Expected ')' after type in sizeof")?;
                 
-                println!("DEBUG PARSER: sizeof type {:?} resolved to size {}", typ, typ.size());
+                // Add debug check for sizeof output
+                if self.debug {
+                    println!("DEBUG PARSER: sizeof type {:?} resolved to size {}", typ, typ.size());
+                }
                 
                 // Push the size of the type
                 self.code.push(OpCode::IMM as i64);
@@ -917,17 +954,8 @@ impl<'a> Parser<'a> {
                                 self.code.push(arg_count as i64);
                                 
                                 // For printf, we need to ensure the arguments are pushed correctly
-                                // String literals are already handled properly, but variables need special handling
-                                println!("DEBUG: Generating printf with {} arguments", arg_count);
-                                
-                                // Add special debug output for printf
-                                if arg_count > 0 {
-                                    let start_idx = self.code.len().saturating_sub(arg_count * 2);
-                                    for i in start_idx..self.code.len() {
-                                        if i < self.code.len() {
-                                            println!("DEBUG: Generated code at pos {}: {}", i, self.code[i]);
-                                        }
-                                    }
+                                if self.debug {
+                                    println!("DEBUG: Generating printf with {} arguments", arg_count);
                                 }
                             }
                         },
@@ -1002,10 +1030,14 @@ impl<'a> Parser<'a> {
                                     // Load original value
                                     if sym_type == Type::Char {
                                         self.code.push(OpCode::LC as i64);
-                                        println!("DEBUG PARSER: Loading char value with LC");
+                                        if self.debug {
+                                            println!("DEBUG PARSER: Loading char value with LC");
+                                        }
                                     } else {
                                         self.code.push(OpCode::LI as i64);
-                                        println!("DEBUG PARSER: Loading int value with LI");
+                                        if self.debug {
+                                            println!("DEBUG PARSER: Loading int value with LI");
+                                        }
                                     }
                                     
                                     // Save original value (will be our result)
@@ -1017,10 +1049,14 @@ impl<'a> Parser<'a> {
                                     
                                     if sym_type == Type::Char {
                                         self.code.push(OpCode::LC as i64);
-                                        println!("DEBUG PARSER: Loading char value with LC");
+                                        if self.debug {
+                                            println!("DEBUG PARSER: Loading char value with LC");
+                                        }
                                     } else {
                                         self.code.push(OpCode::LI as i64);
-                                        println!("DEBUG PARSER: Loading int value with LI");
+                                        if self.debug {
+                                            println!("DEBUG PARSER: Loading int value with LI");
+                                        }
                                     }
                                     
                                     // Add/subtract 1 (or type size for pointers)
@@ -1050,10 +1086,14 @@ impl<'a> Parser<'a> {
                                     // Store back the modified value
                                     if sym_type == Type::Char {
                                         self.code.push(OpCode::SC as i64);
-                                        println!("DEBUG PARSER: Generated SC for global post-inc/dec");
+                                        if self.debug {
+                                            println!("DEBUG PARSER: Generated SC for global post-inc/dec");
+                                        }
                                     } else {
                                         self.code.push(OpCode::SI as i64);
-                                        println!("DEBUG PARSER: Generated SI for global post-inc/dec");
+                                        if self.debug {
+                                            println!("DEBUG PARSER: Generated SI for global post-inc/dec");
+                                        }
                                     }
                                     
                                     // Original value is on stack - pop it as our result
@@ -1069,10 +1109,14 @@ impl<'a> Parser<'a> {
                                     // Based on type, load value
                                     if sym_type == Type::Char {
                                         self.code.push(OpCode::LC as i64);
-                                        println!("DEBUG PARSER: Loading char value with LC");
+                                        if self.debug {
+                                            println!("DEBUG PARSER: Loading char value with LC");
+                                        }
                                     } else {
                                         self.code.push(OpCode::LI as i64);
-                                        println!("DEBUG PARSER: Loading int value with LI");
+                                        if self.debug {
+                                            println!("DEBUG PARSER: Loading int value with LI");
+                                        }
                                     }
                                 }
                                 self.current_type = sym_type;
@@ -1096,15 +1140,21 @@ impl<'a> Parser<'a> {
                                     // Evaluate the expression
                                     self.expr(0)?;
                                     
-                                    println!("DEBUG PARSER: Generating store for assignment to local '{}' with value in AX", name);
+                                    if self.debug {
+                                        println!("DEBUG PARSER: Generating store for assignment to local '{}' with value in AX", name);
+                                    }
                                     
                                     // Store the value
                                     if sym_type == Type::Char {
                                         self.code.push(OpCode::SC as i64);
-                                        println!("DEBUG PARSER: Generated SC (store char)");
+                                        if self.debug {
+                                            println!("DEBUG PARSER: Generated SC (store char)");
+                                        }
                                     } else {
                                         self.code.push(OpCode::SI as i64);
-                                        println!("DEBUG PARSER: Generated SI (store int)");
+                                        if self.debug {
+                                            println!("DEBUG PARSER: Generated SI (store int)");
+                                        }
                                     }
                                 } else {
                                     // Local variable - calculate address from bp
@@ -1112,8 +1162,10 @@ impl<'a> Parser<'a> {
                                     self.code.push(sym_value);
                                     
                                     // Debug output for locals
-                                    println!("DEBUG PARSER: Local variable '{}' at offset {}, generating LEA {}", 
-                                             name, sym_value, sym_value);
+                                    if self.debug {
+                                        println!("DEBUG PARSER: Local variable '{}' at offset {}, generating LEA {}", 
+                                                name, sym_value, sym_value);
+                                    }
                                     
                                     // If we have post-increment/decrement coming up, we'll need to:
                                     // 1. Push the address for later use
@@ -1131,10 +1183,14 @@ impl<'a> Parser<'a> {
                                         // Load original value
                                         if sym_type == Type::Char {
                                             self.code.push(OpCode::LC as i64);
-                                            println!("DEBUG PARSER: Loading char value with LC");
+                                            if self.debug {
+                                                println!("DEBUG PARSER: Loading char value with LC");
+                                            }
                                         } else {
                                             self.code.push(OpCode::LI as i64);
-                                            println!("DEBUG PARSER: Loading int value with LI");
+                                            if self.debug {
+                                                println!("DEBUG PARSER: Loading int value with LI");
+                                            }
                                         }
                                         
                                         // Save original value (will be our result)
@@ -1147,10 +1203,14 @@ impl<'a> Parser<'a> {
                                         // Load it again for modification
                                         if sym_type == Type::Char {
                                             self.code.push(OpCode::LC as i64);
-                                            println!("DEBUG PARSER: Loading char value with LC");
+                                            if self.debug {
+                                                println!("DEBUG PARSER: Loading char value with LC");
+                                            }
                                         } else {
                                             self.code.push(OpCode::LI as i64);
-                                            println!("DEBUG PARSER: Loading int value with LI");
+                                            if self.debug {
+                                                println!("DEBUG PARSER: Loading int value with LI");
+                                            }
                                         }
                                         
                                         // Add/subtract 1 (or type size for pointers)
@@ -1180,10 +1240,14 @@ impl<'a> Parser<'a> {
                                         // Store back the modified value
                                         if sym_type == Type::Char {
                                             self.code.push(OpCode::SC as i64);
-                                            println!("DEBUG PARSER: Generated SC for local post-inc/dec");
+                                            if self.debug {
+                                                println!("DEBUG PARSER: Generated SC for local post-inc/dec");
+                                            }
                                         } else {
                                             self.code.push(OpCode::SI as i64);
-                                            println!("DEBUG PARSER: Generated SI for local post-inc/dec");
+                                            if self.debug {
+                                                println!("DEBUG PARSER: Generated SI for local post-inc/dec");
+                                            }
                                         }
                                         
                                         // Original value is on stack - pop it as our result
@@ -1196,10 +1260,14 @@ impl<'a> Parser<'a> {
                                         // Load value
                                         if sym_type == Type::Char {
                                             self.code.push(OpCode::LC as i64);
-                                            println!("DEBUG PARSER: Loading char value with LC");
+                                            if self.debug {
+                                                println!("DEBUG PARSER: Loading char value with LC");
+                                            }
                                         } else {
                                             self.code.push(OpCode::LI as i64);
-                                            println!("DEBUG PARSER: Loading int value with LI");
+                                            if self.debug {
+                                                println!("DEBUG PARSER: Loading int value with LI");
+                                            }
                                         }
                                     }
                                 }
@@ -1228,10 +1296,14 @@ impl<'a> Parser<'a> {
                 // Generate code to load the value at the address
                 if self.current_type == Type::Char {
                     self.code.push(OpCode::LC as i64);
-                    println!("DEBUG PARSER: Generated LC for dereference");
+                    if self.debug {
+                        println!("DEBUG PARSER: Generated LC for dereference");
+                    }
                 } else {
                     self.code.push(OpCode::LI as i64);
-                    println!("DEBUG PARSER: Generated LI for dereference");
+                    if self.debug {
+                        println!("DEBUG PARSER: Generated LI for dereference");
+                    }
                 }
             },
             Token::And => {
@@ -1250,7 +1322,9 @@ impl<'a> Parser<'a> {
                 // Check if we're taking address of a string literal
                 // In C, we can take address of a string literal directly since it's already a pointer
                 if let Token::Str(_) = self.token() {
-                    println!("DEBUG PARSER: Taking address of string literal (already an address)");
+                    if self.debug {
+                        println!("DEBUG PARSER: Taking address of string literal (already an address)");
+                    }
                     // String literal is already an address, just keep the IMM value
                     self.current_type = Type::Ptr(Box::new(Type::Char));
                     return Ok(());
@@ -1264,8 +1338,10 @@ impl<'a> Parser<'a> {
                         // Great, it's a load instruction - we can replace it with just the address
                         self.code.pop();
                         
-                        println!("DEBUG PARSER: Address-of removed load instruction ({:?})", 
-                                 if last_instr == OpCode::LC as usize { "LC" } else { "LI" });
+                        if self.debug {
+                            println!("DEBUG PARSER: Address-of removed load instruction ({:?})", 
+                                     if last_instr == OpCode::LC as usize { "LC" } else { "LI" });
+                        }
                         
                         // The expression must have resulted in a memory access
                         // Transform the type of the expression to a pointer to its current type
@@ -1277,12 +1353,16 @@ impl<'a> Parser<'a> {
                         let value_if_imm = self.code[code_len - 1]; // The potential address
                         
                         if next_to_last == OpCode::IMM as usize {
-                            println!("DEBUG PARSER: Address-of found IMM {}", value_if_imm);
+                            if self.debug {
+                                println!("DEBUG PARSER: Address-of found IMM {}", value_if_imm);
+                            }
                             // This might be a string literal or a global address
                             // We'll allow taking the address of these
                             self.current_type = Type::Ptr(Box::new(self.current_type.clone()));
                         } else if next_to_last == OpCode::LEA as usize {
-                            println!("DEBUG PARSER: Address-of found LEA {}", value_if_imm);
+                            if self.debug {
+                                println!("DEBUG PARSER: Address-of found LEA {}", value_if_imm);
+                            }
                             // This is address of local var, it's already an address
                             self.current_type = Type::Ptr(Box::new(self.current_type.clone()));
                         } else {
@@ -1493,32 +1573,42 @@ impl<'a> Parser<'a> {
         while self.precedence_of(self.token()) > precedence {
             let op = self.token();
             let op_type = self.current_type.clone(); // Save the LHS type for pointer arithmetic
-            println!("DEBUG PARSER: Found operator {:?} with precedence {}", op, self.precedence_of(op));
+            if self.debug {
+                println!("DEBUG PARSER: Found operator {:?} with precedence {}", op, self.precedence_of(op));
+            }
             self.next();
             
             // Handle assignment specially
             if op == Token::Assign {
-                println!("DEBUG PARSER: Handling assignment operator");
+                if self.debug {
+                    println!("DEBUG PARSER: Handling assignment operator");
+                }
                 // For assignment, we need the LHS to be a loadable location
                 // Check if the last generated code is appropriate
                 if self.code.len() >= 1 {
                     let len = self.code.len();
                     let last_code = self.code[len-1] as usize;
                     
-                    println!("DEBUG PARSER: Checking assignment - last opcode: {:?}", last_code);
+                    if self.debug {
+                        println!("DEBUG PARSER: Checking assignment - last opcode: {:?}", last_code);
+                    }
                     // If the last code is a load instruction (LI or LC), 
                     // pop it off and push a store instead after evaluating the RHS
                     if last_code == OpCode::LI as usize || last_code == OpCode::LC as usize {
                         // Remove the load instruction
                         self.code.pop();
                         
-                        println!("DEBUG PARSER: Assignment detected, removed load instruction ({:?})",
-                                 if last_code == OpCode::LC as usize { "LC" } else { "LI" });
+                        if self.debug {
+                            println!("DEBUG PARSER: Assignment detected, removed load instruction ({:?})",
+                                     if last_code == OpCode::LC as usize { "LC" } else { "LI" });
+                        }
                         
                         // Evaluate the right side of the assignment
                         self.expr(0)?;
                         
-                        println!("DEBUG PARSER: Finished RHS evaluation, generating store");
+                        if self.debug {
+                            println!("DEBUG PARSER: Finished RHS evaluation, generating store");
+                        }
                         
                         // Generate a store instruction
                         if last_code == OpCode::LC as usize {
@@ -1621,7 +1711,9 @@ impl<'a> Parser<'a> {
                 // Special handling for binary operators with pointers
                 match op {
                     Token::Add => {
-                        println!("DEBUG: Handling ADD operator");
+                        if self.debug {
+                            println!("DEBUG: Handling ADD operator");
+                        }
                         self.expr(self.precedence_of(op))?;
                         
                         // If LHS is a pointer, adjust RHS by pointer's base size
@@ -1642,7 +1734,9 @@ impl<'a> Parser<'a> {
                         self.current_type = op_type; // Result has the type of LHS
                     },
                     Token::Sub => {
-                        println!("DEBUG: Handling SUB operator");
+                        if self.debug {
+                            println!("DEBUG: Handling SUB operator");
+                        }
                         self.expr(self.precedence_of(op))?;
                         
                         // Three cases:
@@ -1686,9 +1780,10 @@ impl<'a> Parser<'a> {
                     },
                     // Handle array indexing
                     Token::LeftBracket => {
-                        println!("DEBUG PARSER: Handling array indexing with token LeftBracket");
-                        println!("DEBUG PARSER: Current type: {:?}, is_array: {}", op_type, op_type.is_array());
-                        
+                        if self.debug {
+                            println!("DEBUG PARSER: Handling array indexing with token LeftBracket");
+                            println!("DEBUG PARSER: Current type: {:?}, is_array: {}", op_type, op_type.is_array());
+                        }
                         self.expr(0)?; // Parse index
                         self.expect(Token::RightBracket, "Expected ']' after array index")?;
                         
@@ -1731,43 +1826,57 @@ impl<'a> Parser<'a> {
                     },
                     // For other operators, use standard code generation
                     Token::Mul => { 
-                        println!("DEBUG: Handling MUL operator");
+                        if self.debug {
+                            println!("DEBUG: Handling MUL operator");
+                        }
                         self.expr(self.precedence_of(op))?; 
                         self.code.push(OpCode::MUL as i64); 
                         self.current_type = Type::Int; 
                     },
                     Token::Div => { 
-                        println!("DEBUG: Handling DIV operator");
+                        if self.debug {
+                            println!("DEBUG: Handling DIV operator");
+                        }
                         self.expr(self.precedence_of(op))?; 
                         self.code.push(OpCode::DIV as i64); 
                         self.current_type = Type::Int; 
                     },
                     Token::Mod => { 
-                        println!("DEBUG: Handling MOD operator");
+                        if self.debug {
+                            println!("DEBUG: Handling MOD operator");
+                        }
                         self.expr(self.precedence_of(op))?; 
                         self.code.push(OpCode::MOD as i64); 
                         self.current_type = Type::Int; 
                     },
                     Token::Eq => { 
-                        println!("DEBUG: Handling EQ operator");
+                        if self.debug {
+                            println!("DEBUG: Handling EQ operator");
+                        }
                         self.expr(self.precedence_of(op))?; 
                         self.code.push(OpCode::EQ as i64); 
                         self.current_type = Type::Int; 
                     },
                     Token::Ne => { 
-                        println!("DEBUG: Handling NE operator");
+                        if self.debug {
+                            println!("DEBUG: Handling NE operator");
+                        }
                         self.expr(self.precedence_of(op))?; 
                         self.code.push(OpCode::NE as i64); 
                         self.current_type = Type::Int; 
                     },
                     Token::Le => { 
-                        println!("DEBUG: Handling LE operator");
+                        if self.debug {
+                            println!("DEBUG: Handling LE operator");
+                        }
                         self.expr(self.precedence_of(op))?; 
                         self.code.push(OpCode::LE as i64); 
                         self.current_type = Type::Int; 
                     },
                     Token::Ge => { 
-                        println!("DEBUG: Handling GE operator");
+                        if self.debug {
+                            println!("DEBUG: Handling GE operator");
+                        }
                         self.expr(self.precedence_of(op))?; 
                         self.code.push(OpCode::GE as i64); 
                         self.current_type = Type::Int; 
@@ -1778,13 +1887,17 @@ impl<'a> Parser<'a> {
                     Token::Shl => { self.expr(self.precedence_of(op))?; self.code.push(OpCode::SHL as i64); self.current_type = Type::Int; },
                     Token::Shr => { self.expr(self.precedence_of(op))?; self.code.push(OpCode::SHR as i64); self.current_type = Type::Int; },
                     Token::Lt => { 
-                        println!("DEBUG: Handling LT binary operator");
+                        if self.debug {
+                            println!("DEBUG: Handling LT binary operator");
+                        }
                         self.expr(self.precedence_of(op))?; 
                         self.code.push(OpCode::LT as i64); 
                         self.current_type = Type::Int; 
                     },
                     Token::Gt => { 
-                        println!("DEBUG: Handling GT binary operator");
+                        if self.debug {
+                            println!("DEBUG: Handling GT binary operator");
+                        }
                         self.expr(self.precedence_of(op))?; 
                         self.code.push(OpCode::GT as i64); 
                         self.current_type = Type::Int; 
@@ -1906,27 +2019,39 @@ impl<'a> Parser<'a> {
         match self.token() {
             // If statement
             Token::If => {
-                println!("DEBUG: Parsing if statement at line {}", self.lexer.line());
+                if self.debug {
+                    println!("DEBUG: Parsing if statement at line {}", self.lexer.line());
+                }
                 self.next(); // Skip 'if'
                 self.expect(Token::LeftParen, "Expected '(' after 'if'")?;
-                println!("DEBUG: Parsing if condition, next token: {:?}", self.token());
+                if self.debug {
+                    println!("DEBUG: Parsing if condition, next token: {:?}", self.token());
+                }
                 self.expr(0)?; // Parse condition
-                println!("DEBUG: After condition, result in AX, next token: {:?}", self.token());
+                if self.debug {
+                    println!("DEBUG: After condition, result in AX, next token: {:?}", self.token());
+                }
                 self.expect(Token::RightParen, "Expected ')' after condition")?;
                 
                 // Emit branch if zero
                 self.code.push(OpCode::BZ as i64);
                 let branch_pos = self.code.len();
                 self.code.push(0); // Placeholder for branch target
-                println!("DEBUG: Generated BZ instruction, branch placeholder at position {}", branch_pos);
+                if self.debug {
+                    println!("DEBUG: Generated BZ instruction, branch placeholder at position {}", branch_pos);
+                }
                 
                 // Parse if body
                 self.stmt()?;
                 
                 // Check for else
-                println!("DEBUG: Checking for else clause, token: {:?}", self.token());
+                if self.debug {
+                    println!("DEBUG: Checking for else clause, token: {:?}", self.token());
+                }
                 if self.token() == Token::Else {
-                    println!("DEBUG: Found else clause");
+                    if self.debug {
+                        println!("DEBUG: Found else clause");
+                    }
                     self.next(); // Skip 'else'
                     
                     // Add jump to skip else block
@@ -1943,7 +2068,9 @@ impl<'a> Parser<'a> {
                     // Update jump target to point after else block
                     self.code[jump_pos] = self.code.len() as i64;
                 } else {
-                    println!("DEBUG: No else clause");
+                    if self.debug {
+                        println!("DEBUG: No else clause");
+                    }
                     // No else, update branch target to point to here
                     self.code[branch_pos] = self.code.len() as i64;
                 }
@@ -2131,7 +2258,9 @@ impl<'a> Parser<'a> {
             
             // Expression statement
             _ => {
-                println!("DEBUG: Expression statement, token: {:?}", self.token());
+                if self.debug {
+                    println!("DEBUG: Expression statement, token: {:?}", self.token());
+                }
                 self.expr(0)?;
                 
                 // After expression, expect semicolon

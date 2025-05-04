@@ -55,12 +55,8 @@ fn main() {
         process::exit(1);
     }
     
-    // Set up strict cycle limit and force debug mode off to avoid infinite loops
-    let cycle_limit = 5000;
-    println!("WARNING: Enforcing strict cycle limit of {} instructions", cycle_limit);
-    
     // Parse the source
-    let mut parser = match parser::Parser::new(&source, false) {
+    let mut parser = match parser::Parser::new(&source, debug) {
         mut p => {
             if let Err(e) = p.init() {
                 eprintln!("Parser initialization failed: {}", e);
@@ -79,19 +75,42 @@ fn main() {
         }
     };
     
-    // Create VM with debug mode disabled
-    let mut vm = vm::VM::new(code, data, false);
+    // Early return if only parsing source
+    if src {
+        println!("Source parsed successfully.");
+        process::exit(0);
+    }
     
-    // Run with cycle limit
+    // Print a clean starting message if not in debug mode
+    if !debug {
+        println!("C4_RUST RUNNING...");
+        println!("--------");
+    }
+    
+    // Create VM with debug mode setting
+    let mut vm = vm::VM::new(code, data, debug);
+    
+    // Run program once and get result
     match vm.run() {
         Ok(value) => {
-            println!("Program executed successfully with return value: {}", value);
+            if !debug {
+                println!("--------");
+                println!("END OF OUTPUT, QUITTING...");
+            }
+            if debug {
+                println!("Program executed successfully with return value: {}", value);
+            }
         },
         Err(e) => {
-            if e.contains("Maximum instruction limit") {
-                println!("Program terminated due to possible infinite loop");
-                println!("This is a known issue with array access in our implementation.");
-                println!("The array feature still has bugs in code generation for array indexing.");
+            if !debug {
+                println!("--------");
+                println!("END OF OUTPUT, QUITTING...");
+            }
+            
+            if e.contains("instruction limit") {
+                eprintln!("Program terminated due to possible infinite loop");
+                eprintln!("This is a known issue with array access in our implementation.");
+                eprintln!("The array feature still has bugs in code generation for array indexing.");
                 process::exit(1);
             } else {
                 eprintln!("Runtime error: {}", e);
