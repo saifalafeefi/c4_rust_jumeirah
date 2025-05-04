@@ -226,54 +226,76 @@ impl<'a> Lexer<'a> {
                         self.current_token = Token::Num(value);
                     },
                     
-                    // strings
+                    // strings and chars
                     '\'' | '"' => {
                         let string_delim = c;
                         let start_pos = self.string_buffer.len();
                         
                         while let Some(&next_c) = self.chars.peek() {
+                            self.chars.next(); // consume char
+                            self.pos += 1;
+                            
                             if next_c == string_delim {
-                                self.chars.next(); // consume quote
-                                self.pos += 1;
-                                break;
+                                break; // end of literal
                             }
                             
                             // handle escapes
                             if next_c == '\\' {
-                                self.chars.next(); // consume backslash
-                                self.pos += 1;
-                                
-                                match self.chars.next() {
-                                    Some('n') => {
-                                        self.string_buffer.push(b'\n');
-                                        self.pos += 1;
-                                    },
-                                    Some(esc_char) => {
-                                        self.string_buffer.push(esc_char as u8);
-                                        self.pos += 1;
-                                    },
-                                    None => break,
+                                if let Some(escaped_char) = self.chars.next() {
+                                    self.pos += 1;
+                                    match escaped_char {
+                                        'n' => self.string_buffer.push(b'\n'),
+                                        't' => self.string_buffer.push(b'\t'),
+                                        'r' => self.string_buffer.push(b'\r'),
+                                        '\\' => self.string_buffer.push(b'\\'),
+                                        '"' => self.string_buffer.push(b'\"'),
+                                        '\'' => self.string_buffer.push(b'\''),
+                                        '0' => self.string_buffer.push(b'\0'),
+                                        // Handle hex escapes (e.g., \\x41 for 'A') - Simplified for now
+                                        // Handle octal escapes (e.g., \\101 for 'A') - Simplified for now
+                                        _ => self.string_buffer.push(escaped_char as u8), // Unknown escape, just use the char
+                                    }
+                                } else {
+                                    // EOF during escape sequence
+                                    break;
                                 }
                             } else {
                                 self.string_buffer.push(next_c as u8);
-                                self.chars.next();
-                                self.pos += 1;
                             }
                         }
                         
                         if string_delim == '"' {
-                            // for strings
-                            self.current_value = start_pos as i64;
+                            // Null-terminate the string in the buffer
+                            self.string_buffer.push(0); 
+                            
+                            self.current_value = start_pos as i64; // Value is start index
                             self.current_token = Token::Str(start_pos);
+                            println!("DEBUG LEXER: Found string literal at index {}", start_pos);
                         } else {
-                            // for chars
+                            // char literal - value is the ASCII code
                             if start_pos < self.string_buffer.len() {
-                                self.current_value = self.string_buffer[start_pos] as i64;
-                                self.current_token = Token::Num(self.current_value);
+                                // Handle actual escaped char value from buffer
+                                let char_byte = self.string_buffer[start_pos];
+                                let char_val = match char_byte {
+                                    // Use actual byte values
+                                    b'\n' => b'\n' as i64,
+                                    b'\t' => b'\t' as i64,
+                                    b'\r' => b'\r' as i64,
+                                    b'\\' => b'\\' as i64,
+                                    b'"' => b'"' as i64,
+                                    b'\'' => b'\'' as i64,
+                                    b'\0' => 0,
+                                    _ => char_byte as i64,
+                                };
+                                self.current_value = char_val;
+                                // Remove the char data from buffer, not needed after value extraction
+                                self.string_buffer.truncate(start_pos); 
                             } else {
+                                // Empty char literal ''? -> value 0
                                 self.current_value = 0;
-                                self.current_token = Token::Num(0);
                             }
+                            self.current_token = Token::Num(self.current_value);
+                            println!("DEBUG LEXER: Found char literal with value {}", self.current_value);
                         }
                     },
                     
@@ -717,12 +739,12 @@ mod tests {
     fn test_strings() {
         let mut lexer = Lexer::new("\"hello\" 'c'");
         
-        // string
+        // Test string literal
         assert_eq!(lexer.next(), Token::Str(0));
         let str_content = lexer.string_buffer();
-        assert_eq!(str_content, b"hello");
+        assert_eq!(str_content, b"hello\0");
         
-        // char
+        // Test char literal
         assert_eq!(lexer.next(), Token::Num('c' as i64));
         assert_eq!(lexer.value(), 'c' as i64);
         
