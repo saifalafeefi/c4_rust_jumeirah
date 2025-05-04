@@ -84,28 +84,13 @@ The project includes several example C programs that can be used to test the com
 
 ```bash
 # Run a simple "Hello, World!" program
-cargo run single_variable_test.c
+cargo run test1.c
 
 # Run a more complex test
-cargo run complex_test.c
+cargo run test9.c
 
 # Run with debug information
-cargo run -- -d single_variable_test.c
-```
-
-## Example
-
-To compile and run the original C4 source:
-
-```bash
-# Assuming c4.c is in the current directory
-cargo run -- c4.c
-
-# Or with debugging information
-cargo run -- -d c4.c
-
-# Or with source and assembly output
-cargo run -- -s c4.c
+cargo run -- -d test7.c
 ```
 
 ## Documentation
@@ -210,4 +195,4 @@ This project is licensed under the MIT License (open source)
 ## Acknowledgments
 
 - Robert Swierczek for the original C4 compiler
-- Khalifa University assignment that inspired this implementation 
+- Khalifa University's Principles of Prog. Languages assignment that inspired this implementation 
