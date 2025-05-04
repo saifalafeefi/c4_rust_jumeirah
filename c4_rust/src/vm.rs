@@ -418,20 +418,28 @@ impl VM {
                         // Store to data segment
                         if addr >= self.data.len() {
                            self.data.resize(addr + 1, 0);
-                           println!("DEBUG VM: SC - Resized data segment to {} for address {}", self.data.len(), addr);
+                           if self.debug {
+                               println!("DEBUG VM: SC - Resized data segment to {} for address {}", self.data.len(), addr);
+                           }
                         }
                         self.data[addr] = char_val;
-                         println!("DEBUG VM: SC - Stored char '{}' ({}) to data address {}", char_val as char, char_val, addr);
+                        if self.debug {
+                            println!("DEBUG VM: SC - Stored char '{}' ({}) to data address {}", char_val as char, char_val, addr);
+                        }
                     } else {
                          // Store to stack (lowest byte)
                          if addr >= self.stack.len() {
                              let new_size = addr + 64; // Add buffer
-                             println!("DEBUG VM: SC - Growing stack from {} to {} for address {}", self.stack.len(), new_size, addr);
+                             if self.debug {
+                                 println!("DEBUG VM: SC - Growing stack from {} to {} for address {}", self.stack.len(), new_size, addr);
+                             }
                              self.stack.resize(new_size, 0);
                          }
                          // Modify only the lowest byte, preserving higher bytes
                          self.stack[addr] = (self.stack[addr] & !0xFF) | (char_val as i64);
-                         println!("DEBUG VM: SC - Stored char '{}' ({}) to stack address {}, stack[{}] now {}", char_val as char, char_val, addr, addr, self.stack[addr]);
+                         if self.debug {
+                             println!("DEBUG VM: SC - Stored char '{}' ({}) to stack address {}, stack[{}] now {}", char_val as char, char_val, addr, addr, self.stack[addr]);
+                         }
                      }
                 },
                 

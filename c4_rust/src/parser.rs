@@ -1623,7 +1623,9 @@ impl<'a> Parser<'a> {
                     // Array indexing case - the last instruction(s) should have calculated an address
                     // but we didn't load from it yet because we saw the assignment coming
                     else if last_code == OpCode::ADD as usize || last_code == OpCode::MUL as usize {
-                        println!("DEBUG PARSER: Assignment to array element detected");
+                        if self.debug {
+                            println!("DEBUG PARSER: Assignment to array element detected");
+                        }
                         
                         // Push the calculated address on the stack
                         self.code.push(OpCode::PSH as i64);
@@ -1634,10 +1636,14 @@ impl<'a> Parser<'a> {
                         // Store to the calculated address
                         if op_type == Type::Char {
                             self.code.push(OpCode::SC as i64);
-                            println!("DEBUG PARSER: Generated SC for char array element");
+                            if self.debug {
+                                println!("DEBUG PARSER: Generated SC for char array element");
+                            }
                         } else {
                             self.code.push(OpCode::SI as i64);
-                            println!("DEBUG PARSER: Generated SI for int array element");
+                            if self.debug {
+                                println!("DEBUG PARSER: Generated SI for int array element");
+                            }
                         }
                         continue;
                     }
@@ -1649,7 +1655,9 @@ impl<'a> Parser<'a> {
                       op == Token::ShrAssign || op == Token::AndAssign || op == Token::XorAssign || 
                       op == Token::OrAssign {
                 // For compound assignments like a += b, convert to a = a + b
-                println!("DEBUG: Converting compound assignment to normal assignment");
+                if self.debug {
+                    println!("DEBUG: Converting compound assignment to normal assignment");
+                }
                 
                 // Get the code to load the LHS variable (without the actual load instruction)
                 if self.code.len() < 2 {

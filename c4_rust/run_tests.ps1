@@ -1,37 +1,34 @@
 # run all tests
 Write-Host "Running unit tests..." -ForegroundColor Green
-cargo test
+# Set RUSTFLAGS to suppress all warnings
+$env:RUSTFLAGS = "-A warnings"
+cargo test -q 2>$null
 
 # run c test programs
 Write-Host "Running C test programs..." -ForegroundColor Green
 
-# Define all possible test files
-$potentialFiles = @(
-    "simple_test.c",
-    "test_program.c",
-    "combined_control_flow_test.c", 
-    "complex_test.c",
-    "multiple_variables_test.c",
-    "nested_loop_test.c",
-    "printf_test.c",
-    "simple_array_test.c",
-    "simple_comparison_test.c",
-    "simple_for_test.c",
-    "simple_while_test.c",
-    "single_variable_test.c",
-    "string_test.c"
-)
+# Define test directory path
+$testDir = "tests/C_files"
 
-# Filter to only include files that exist
-$testFiles = @()
-foreach ($file in $potentialFiles) {
-    if (Test-Path $file) {
-        $testFiles += $file
-        Write-Host "Found test file: $file" -ForegroundColor Green
-    }
-    else {
-        Write-Host "Test file not found (skipping): $file" -ForegroundColor Yellow
-    }
+# Get all test files matching the pattern test_*.c and sort them numerically based on the number in the filename
+$testFiles = Get-ChildItem -Path $testDir -Filter "test_*.c" | 
+             ForEach-Object { 
+                # Extract the number from the filename
+                $number = [int]($_.BaseName -replace 'test_', '')
+                # Create object with original file and its numeric value
+                [PSCustomObject]@{
+                    FullName = $_.FullName
+                    Number = $number
+                }
+             } | 
+             # Sort by the numeric value
+             Sort-Object -Property Number |
+             # Return just the full path
+             ForEach-Object { $_.FullName }
+
+# Report found files
+foreach ($file in $testFiles) {
+    Write-Host "Found test file: $file" -ForegroundColor Green
 }
 
 Write-Host "Running $($testFiles.Count) test files" -ForegroundColor Green
@@ -40,6 +37,10 @@ Write-Host "Running $($testFiles.Count) test files" -ForegroundColor Green
 Write-Host "Running tests in normal mode..." -ForegroundColor Cyan
 foreach ($file in $testFiles) {
     Write-Host "Testing: $file" -ForegroundColor Yellow
-    cargo run $file
+    # Run with warnings suppressed and errors redirected
+    cargo run -q $file 2>$null
     Write-Host ""
 }
+
+# Restore RUSTFLAGS when done
+$env:RUSTFLAGS = ""
