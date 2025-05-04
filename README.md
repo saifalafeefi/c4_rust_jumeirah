@@ -141,15 +141,6 @@ cargo test test_self_hosting_capabilities -- --nocapture
 .\run_tests.ps1
 ```
 
-### Test Files
-
-The project includes several test files:
-
-- `simple_test.c`: A basic "Hello, World!" program
-- `test_program.c`: A more complex test program that exercises various C features
-- `tests/simple_printf.c`: Tests simple printf functionality
-- `tests/printf_test.c`: Tests more complex printf functionality
-
 ### Test Modules
 
 The Rust tests are organized into several modules:
@@ -214,9 +205,9 @@ The Rust tests are organized into several modules:
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License (open source)
 
 ## Acknowledgments
 
 - Robert Swierczek for the original C4 compiler
-- University assignment that inspired this implementation 
+- Khalifa University assignment that inspired this implementation 
