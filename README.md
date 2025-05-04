@@ -19,25 +19,24 @@ The project is organized into several key components:
 
 ## Features
 
-- Tokenizes and parses the same subset of C as the original C4
-- Supports self-compilation (can compile its original C code)
-- Uses a virtual machine to execute the compiled code
-- Preserves the minimal design of C4 while using Rust idioms
-- Includes robust error handling and bounds checking for stack safety
+- **Lexing and Parsing**: Tokenizes and parses a significant subset of C, including:
+  - Keywords: `int`, `char`, `if`, `else`, `while`, `for`, `return`, `sizeof`, `enum`, `void`.
+  - Operators: Arithmetic (`+`, `-`, `*`, `/`, `%`), comparison (`==`, `!=`, `<`, `>`, `<=`, `>=`), logical (`&&`, `||`, `!`), bitwise (`&`, `|`, `^`, `~`, `<<`, `>>`), assignment (`=`, `+=`, `-=`, etc.), increment/decrement (`++`, `--`), address-of (`&`), dereference (`*`).
+  - Literals: Integers (decimal, hex, octal), character literals (`'c'`), string literals (`"string"`).
+  - Control Flow: `if-else`, `while` loops, `for` loops, `return` statements, blocks (`{}`).
+  - Declarations: Global and local variables (int, char), pointers (`*`), arrays (`[]`), function definitions and calls, `enum` declarations.
+  - Basic `printf` support for `%d` and `%s` format specifiers.
+- **Virtual Machine**: Executes the compiled bytecode using a stack-based architecture. Supports basic system calls like `printf`, `exit`.
+- **Error Handling**: Uses Rust's `Result` type for error propagation during parsing and execution.
+- **Testing**: Includes unit tests for lexer, parser components, VM execution, pointer operations, memory access, and basic self-hosting checks.
 
 ## Known Limitations
 
-While our implementation covers most of the core functionality of C4, there are some known limitations:
-
-1. **Complex expressions in original C4**: Our Rust implementation doesn't fully handle some of the complex expressions in the original C4 source code, specifically:
-   - The string indexing and pointer arithmetic used in the printf statements around lines 58-61
-   - The bit shift operations used for token hashing around line 73
-   - These limitations only affect full self-hosting (compiling the original C4 with our implementation) and don't impact the ability to compile and run normal C programs.
-
-2. **Implementation differences**: Some aspects of the implementation are handled differently in Rust compared to C, particularly:
-   - Memory management (using Rust's ownership system)
-   - Error handling (using Result types instead of exit calls)
-   - Symbol table organization (using structured data types)
+- **Self-Hosting**: While the parser can process most of the original `c4.c` source, it currently skips or has workarounds for specific complex expressions involving intricate pointer arithmetic and bitwise operations (notably around lines 58-61 and 73 in `c4.c`). Full self-compilation equivalent to the original C4 is not yet achieved due to these complex C idioms.
+- **Array Implementation**: Array indexing is supported, but the underlying memory management and code generation for complex array operations might still have bugs or lead to VM issues like infinite loops in specific scenarios (as noted in `main.rs`). The `simple_array_test.c` works, but more complex uses might fail.
+- **String Escapes**: Basic string escapes (`\n`, `\t`, `\\`, `\"`, `\'`, `\0`) are handled, but more complex C escape sequences (hex, octal) might not be fully supported.
+- **Memory Model**: The VM uses separate data and stack segments with a simplified memory model compared to a real C environment. Direct memory manipulation beyond stack operations and basic data access might behave differently.
+- **System Calls**: Only a subset of the original C4 system calls (`printf`, `exit`, `malloc`, `memset`, `memcmp`) are implemented. File I/O (`open`, `read`, `close`) is stubbed.
 
 ## Building
 
@@ -171,6 +170,23 @@ The Rust tests are organized into several modules:
 - [x] Comprehensive test suite
 - [x] Code documentation
 - [x] Self-hosting verification testing
+- [x] Basic Type System (int, char, pointers)
+- [x] Expression Parsing (arithmetic, logical, bitwise, assignment, function calls, sizeof, casting)
+- [x] Statement Parsing (if-else, while, for, return, blocks, expression statements)
+- [x] Variable Declarations (global, local, parameters)
+- [x] Pointer Operations (address-of `&`, dereference `*`, basic arithmetic)
+- [x] Array Declarations and Indexing (`[]`)
+- [x] String Literals and Basic `printf` (`%d`, `%s`)
+- [x] Enum Declarations
+- [x] VM Implementation (stack machine, basic instruction set)
+- [x] System Calls (`printf`, `exit`, `malloc`, `memset`, `memcmp`)
+- [x] Partial Self-Hosting Capability (parses most of `c4.c` with known skips)
+- [x] Unit Testing (lexer, parser, VM, pointers, memory)
+- [x] Code Documentation (`cargo doc`)
+- [ ] Full Self-Hosting Equivalence
+- [ ] Complete System Call Implementation (File I/O)
+- [ ] Robust Array Handling for all cases
+- [ ] Advanced String Escape Sequence Support
 
 ## License
 
