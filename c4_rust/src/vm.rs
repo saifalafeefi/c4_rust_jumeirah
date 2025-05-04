@@ -4,6 +4,9 @@
 use crate::parser::{OpCode, Parser};
 use std::io::Write;
 
+// Define threshold to differentiate data/stack addresses
+const DATA_STACK_THRESHOLD: usize = 1024 * 1024; // 1MB threshold
+
 /// VM state
 pub struct VM {
     code: Vec<i64>,       // code segment
@@ -20,17 +23,18 @@ pub struct VM {
 impl VM {
     /// creates new VM
     pub fn new(code: Vec<i64>, data: Vec<u8>, debug: bool) -> Self {
-        // larger stack size to prevent overflow
-        let stack_size = 8192;
-        
-        // init stack to zeros
-        let mut stack = Vec::with_capacity(stack_size);
-        stack.resize(stack_size, 0);
-        
-        // leave room for use
-        let sp = stack_size - 20;
-        let bp = stack_size - 20;
-        
+        // Define stack size and base address
+        let stack_size = 8192; // Keep the stack size moderate
+        let stack_base_addr = DATA_STACK_THRESHOLD; // Start stack addresses here
+
+        // Ensure stack vector has enough capacity
+        let total_stack_capacity = stack_base_addr + stack_size;
+        let mut stack = vec![0i64; total_stack_capacity]; // Initialize stack
+
+        // Set initial SP and BP relative to the base address
+        let sp = stack_base_addr + stack_size - 20; // Leave room at the top
+        let bp = sp;
+
         VM {
             code,
             data,
@@ -39,20 +43,15 @@ impl VM {
             bp,
             ax: 0,
             stack,
-            debug: false,
+            debug,
             cycle: 0,
         }
     }
     
     /// runs until exit
     pub fn run(&mut self) -> Result<i64, String> {
-        // Initialize stack with a larger size to accommodate arrays
-        self.stack = vec![0; 8192];
-        
         // Initialize PC, SP, BP
         self.pc = 0;
-        self.sp = self.stack.len();
-        self.bp = self.sp;
         
         // Extra debug info about initial memory state
         if self.debug {
@@ -64,7 +63,7 @@ impl VM {
         self.dump_stack(0, 10);
         
         self.cycle = 0;
-        let max_cycles = 5000; // Add a limit to prevent infinite loops
+        let max_cycles = 50000; // Increase limit significantly
         
         // Execute main function at position 0
         while self.pc < self.code.len() {
@@ -74,11 +73,17 @@ impl VM {
                 return Err(format!("Execution aborted after {} instructions - possible infinite loop", max_cycles));
             }
             
+            let op_addr = self.pc;
             let op = self.code[self.pc] as u8;
             self.pc += 1;
             
-            if self.debug && self.cycle < 1000 { // prevent too much log output
-                self.print_debug_info(op as usize);
+            println!("VM LOOP: Processing Opcode {} ({}) at Addr {}", self.op_to_string(op as usize), op, op_addr);
+            
+            // Argument fetching moved inside handlers
+            
+            if self.debug { // Use the VM's debug flag
+                // Pass the optional argument to the debug printer
+                // self.print_debug_info(op as usize, op_addr, None); // Arg fetching moved
             }
             
             self.cycle += 1;
@@ -86,7 +91,8 @@ impl VM {
             match op {
                 // LEA: Load effective address
                 op if op == OpCode::LEA as u8 => {
-                    let offset = self.next_code() as usize;
+                    let offset = self.code[op_addr + 1] as usize;
+                    self.pc += 1; // Consume argument
                     
                     // Calculate effective address for a local variable
                     // In C4, local variables are stored at positions below BP:
@@ -120,7 +126,8 @@ impl VM {
                 
                 // IMM: Load immediate value
                 op if op == OpCode::IMM as u8 => {
-                    self.ax = self.next_code();
+                    self.ax = self.code[op_addr + 1];
+                    self.pc += 1; // Consume argument
                     if self.debug {
                         println!("DEBUG VM: IMM - Loaded immediate value {}", self.ax);
                     }
@@ -128,7 +135,7 @@ impl VM {
                 
                 // JMP: Jump
                 op if op == OpCode::JMP as u8 => {
-                    self.pc = self.next_code() as usize;
+                    self.pc = self.code[op_addr + 1] as usize; // Jump target is arg
                 },
                 
                 // JSR: Jump to subroutine
@@ -138,15 +145,16 @@ impl VM {
                         return Err("Stack overflow in JSR".to_string());
                     }
                     self.sp -= 1;
-                    self.stack[self.sp] = self.pc as i64 + 1; // +1 to skip JSR argument
+                    self.stack[self.sp] = self.pc as i64; // PC is already advanced past arg
                     
                     // Jump to function entry
-                    self.pc = self.next_code() as usize;
+                    self.pc = self.code[op_addr + 1] as usize; // Jump target is arg
                 },
                 
                 // BZ: Branch if zero
                 op if op == OpCode::BZ as u8 => {
-                    let target = self.next_code() as usize;
+                    let target = self.code[op_addr + 1] as usize;
+                    self.pc += 1; // Consume argument
                     if self.ax == 0 {
                         self.pc = target;
                     }
@@ -154,7 +162,8 @@ impl VM {
                 
                 // BNZ: Branch if not zero
                 op if op == OpCode::BNZ as u8 => {
-                    let target = self.next_code() as usize;
+                    let target = self.code[op_addr + 1] as usize;
+                    self.pc += 1; // Consume argument
                     if self.ax != 0 {
                         self.pc = target;
                     }
@@ -162,7 +171,8 @@ impl VM {
                 
                 // ENT: Enter function
                 op if op == OpCode::ENT as u8 => {
-                    let local_size = self.next_code() as usize;
+                    let local_size = self.code[op_addr + 1] as usize;
+                    self.pc += 1; // Consume argument
                     println!("DEBUG VM: ENT - Creating stack frame with {} local variables", local_size);
                     println!("DEBUG VM: ENT - Old BP: {}, Old SP: {}", self.bp, self.sp);
                     
@@ -237,7 +247,8 @@ impl VM {
                 
                 // ADJ: Adjust stack
                 op if op == OpCode::ADJ as u8 => {
-                    let n = self.next_code() as usize;
+                    let n = self.code[op_addr + 1] as usize;
+                    self.pc += 1; // Consume argument
                     
                     // Check if we need to grow the stack
                     if self.sp + n >= self.stack.len() {
@@ -311,87 +322,115 @@ impl VM {
                 op if op == OpCode::LI as u8 => {
                     let addr = self.ax as usize;
                     
-                    // Bounds check
-                    if addr >= self.stack.len() {
-                        return Err(format!("Invalid memory access: tried to load from address {} but stack size is {}", 
-                                          addr, self.stack.len()));
+                    if addr < DATA_STACK_THRESHOLD {
+                        // Load from data segment (assuming it's aligned)
+                        if addr + std::mem::size_of::<i64>() > self.data.len() {
+                             return Err(format!("Data segment read out of bounds: addr={}, size={}", addr, self.data.len()));
+                        }
+                        let bytes = self.data[addr..addr + std::mem::size_of::<i64>()].try_into().unwrap();
+                        self.ax = i64::from_ne_bytes(bytes);
+                        println!("VM DEBUG: LI - Loaded int {} from data address {}", self.ax, addr);
+                    } else {
+                        // Load from stack
+                        if addr >= self.stack.len() {
+                            return Err(format!("Stack read out of bounds: addr={}, size={}", addr, self.stack.len()));
+                        }
+                        self.ax = self.stack[addr];
+                        println!("VM DEBUG: LI - Loaded int {} from stack address {}", self.ax, addr);
+                        // Print stack around the loaded address to help debug array issues
+                        self.dump_stack(addr.saturating_sub(3), 6);
                     }
                     
-                    // IMPORTANT: Print the address and value for debugging array issues
-                    println!("VM DEBUG: Loading int from address {} with value {}", addr, self.stack[addr]);
-                    
-                    self.ax = self.stack[addr];
-                    
-                    // Print stack around the loaded address to help debug array issues
-                    self.dump_stack(addr.saturating_sub(3), 6);
-                    
-                    println!("VM DEBUG: Loaded value {} from address {}", self.ax, addr);
                     self.cycle += 1;
                 },
                 
                 // load char
                 op if op == OpCode::LC as u8 => {
                     let addr = self.ax as usize;
-                    println!("DEBUG VM: LC - Loading char from stack addr {}", addr);
-                    
-                    // check valid addr
-                    if addr >= self.stack.len() {
-                        return Err(format!("Invalid memory access: tried to load char from address {} but stack size is {}", addr, self.stack.len()));
+                    if addr < DATA_STACK_THRESHOLD {
+                        // Load from data segment
+                        if addr >= self.data.len() {
+                            return Err(format!("Data segment read out of bounds: addr={}, size={}", addr, self.data.len()));
+                        }
+                        self.ax = self.data[addr] as i64;
+                        println!("DEBUG VM: LC - Loaded char '{}' ({}) from data address {}", self.ax as u8 as char, self.ax, addr);
+                    } else {
+                        // Load from stack (lowest byte)
+                        if addr >= self.stack.len() {
+                            return Err(format!("Stack read out of bounds: addr={}, size={}", addr, self.stack.len()));
+                        }
+                        self.ax = self.stack[addr] & 0xFF;
+                        println!("DEBUG VM: LC - Loaded char '{}' ({}) from stack address {}", self.ax as u8 as char, self.ax, addr);
                     }
-                    
-                    self.ax = (self.stack[addr] & 0xFF) as i64;
-                    println!("DEBUG VM: LC - Loaded char value {} from stack[{}]", self.ax, addr);
                 },
                 
                 // SI: Store int
                 op if op == OpCode::SI as u8 => {
                     // Pop the address from the stack
                     if self.sp >= self.stack.len() {
-                        return Err(format!("Stack underflow in SI: sp={}", self.sp));
+                        return Err(format!("Stack empty in SI: sp={}", self.sp));
                     }
-                    
+                    let raw_addr_from_stack = self.stack[self.sp];
+                    println!("VM SI HANDLER: Reading address {} from stack[{}]", raw_addr_from_stack, self.sp);
                     let addr = self.stack[self.sp] as usize;
                     self.sp += 1;
+                    let value_to_store = self.ax; // Get value from ax (RHS)
                     
-                    // IMPORTANT: Print the address and value for debugging array issues
-                    println!("VM DEBUG: Storing int value {} to address {}", self.ax, addr);
-                    
-                    // Bounds check and grow if needed
-                    if addr >= self.stack.len() {
-                        let new_size = addr + 64;  // Add some buffer
-                        println!("DEBUG VM: SI - Growing stack from {} to {} for address {}", 
-                                self.stack.len(), new_size, addr);
-                        self.stack.resize(new_size, 0);
+                    println!("VM SI HANDLER: Checking addr {} < DATA_STACK_THRESHOLD {}", addr, DATA_STACK_THRESHOLD);
+
+                    if addr < DATA_STACK_THRESHOLD {
+                        // Store to data segment
+                        let required_size = addr + std::mem::size_of::<i64>();
+                        if required_size > self.data.len() {
+                           self.data.resize(required_size, 0);
+                           println!("DEBUG VM: SI - Resized data segment to {} for address {}", self.data.len(), addr);
+                        }
+                        self.data[addr..required_size].copy_from_slice(&value_to_store.to_ne_bytes());
+                        println!("DEBUG VM: SI - Stored int {} to stack address {}", value_to_store, addr);
+                        println!("DEBUG VM: SI - Stored int {} to data address {}", value_to_store, addr);
+                    } else {
+                         // Store to stack
+                        if addr >= self.stack.len() {
+                            let new_size = addr + 64; // Add buffer
+                            println!("DEBUG VM: SI - Growing stack from {} to {} for address {}", self.stack.len(), new_size, addr);
+                            self.stack.resize(new_size, 0);
+                        }
+                        self.stack[addr] = value_to_store;
+                        // println!("DEBUG VM: SI - Stored int {} to stack address {}", value_to_store, addr); // Reduced noise
                     }
                     
-                    // Store the value
-                    self.stack[addr] = self.ax;
-                    
-                    // Print stack around the stored address to help debug array issues
-                    self.dump_stack(addr.saturating_sub(3), 6);
-                    
-                    println!("VM DEBUG: Stored value {} to address {}", self.ax, addr);
                     self.cycle += 1;
                 },
                 
                 // store char
                 op if op == OpCode::SC as u8 => {
-                    let addr = self.stack[self.sp] as usize;
-                    println!("DEBUG VM: SC - Storing char {} to stack addr {}", self.ax & 0xFF, addr);
-                    
-                    // Bounds check and grow if needed
-                    if addr >= self.stack.len() {
-                        let new_size = addr + 64;  // Add some buffer
-                        println!("DEBUG VM: SC - Growing stack from {} to {} for address {}", 
-                                self.stack.len(), new_size, addr);
-                        self.stack.resize(new_size, 0);
+                    // Pop the address from the stack
+                    if self.sp >= self.stack.len() {
+                        return Err(format!("Stack empty in SC: sp={}", self.sp));
                     }
-                    
-                    let current_value = self.stack[addr];
-                    self.stack[addr] = (current_value & !0xFF) | (self.ax & 0xFF); // keep other bits
+                    let addr = self.stack[self.sp] as usize;
                     self.sp += 1;
+                    let char_val = (self.ax & 0xFF) as u8;
                     
-                    println!("DEBUG VM: SC - After store: stack[{}] = {}", addr, self.stack[addr]);
+                    if addr < DATA_STACK_THRESHOLD {
+                        // Store to data segment
+                        if addr >= self.data.len() {
+                           self.data.resize(addr + 1, 0);
+                           println!("DEBUG VM: SC - Resized data segment to {} for address {}", self.data.len(), addr);
+                        }
+                        self.data[addr] = char_val;
+                         println!("DEBUG VM: SC - Stored char '{}' ({}) to data address {}", char_val as char, char_val, addr);
+                    } else {
+                         // Store to stack (lowest byte)
+                         if addr >= self.stack.len() {
+                             let new_size = addr + 64; // Add buffer
+                             println!("DEBUG VM: SC - Growing stack from {} to {} for address {}", self.stack.len(), new_size, addr);
+                             self.stack.resize(new_size, 0);
+                         }
+                         // Modify only the lowest byte, preserving higher bytes
+                         self.stack[addr] = (self.stack[addr] & !0xFF) | (char_val as i64);
+                         println!("DEBUG VM: SC - Stored char '{}' ({}) to stack address {}, stack[{}] now {}", char_val as char, char_val, addr, addr, self.stack[addr]);
+                     }
                 },
                 
                 // push value
@@ -520,9 +559,10 @@ impl VM {
                     self.ax = 0; // not supported
                 },
                 op if op == OpCode::PRTF as u8 => {
-                    // Get argument count
-                    let argc = self.next_code() as usize;
-                    
+                    let argc = self.code[op_addr + 1] as usize;
+                    self.pc += 1; // Consume argument
+
+                    /*
                     if self.debug {
                         println!("DEBUG VM: PRTF - Called with {} arguments", argc);
                         println!("DEBUG VM: PRTF - Stack state at entry:");
@@ -532,6 +572,7 @@ impl VM {
                             }
                         }
                     }
+                    */
                     
                     // Create a temporary slice reference to the arguments for easier access
                     // This matches the original C4's `t = sp + pc[1]` approach
@@ -606,13 +647,14 @@ impl VM {
                     // Process format string
                     let mut result = String::new();
                     let mut arg_idx = 0; // Track which format specifier we're processing
+                    let format_chars: Vec<char> = format_str.chars().collect();
                     let mut i = 0;
-                    
-                    while i < format_str.len() {
-                        let c = format_str.chars().nth(i).unwrap();
-                        
-                        if c == '%' && i + 1 < format_str.len() {
-                            let next_c = format_str.chars().nth(i + 1).unwrap();
+
+                    while i < format_chars.len() {
+                        let c = format_chars[i]; // Safe access
+
+                        if c == '%' && i + 1 < format_chars.len() {
+                            let next_c = format_chars[i + 1]; // Safe access
                             match next_c {
                                 'd' => {
                                     // Integer format
@@ -640,21 +682,37 @@ impl VM {
                                         // Get string address from arg stack
                                         let str_addr = t[argc - 2 - arg_idx] as usize;
                                         
-                                        if self.debug {
-                                            println!("DEBUG VM: PRTF - %s argument {} = {} (t[-{}])", 
-                                                    arg_idx, str_addr, 2 + arg_idx);
-                                        }
-                                        
-                                        // Bounds check
-                                        if str_addr < self.data.len() {
-                                            // Read string from data segment
+                                        // Determine if address is data or stack
+                                        if str_addr < DATA_STACK_THRESHOLD {
+                                            // Read from data segment
+                                            if self.debug {
+                                                 println!("DEBUG VM: PRTF - %s reading from data address {}", str_addr);
+                                            }
                                             let mut j = str_addr;
                                             while j < self.data.len() && self.data[j] != 0 {
                                                 result.push(self.data[j] as char);
                                                 j += 1;
                                             }
+                                            if j == self.data.len() && self.data.last() != Some(&0) {
+                                                println!("Warning: PRTF %s reached end of data without null terminator at addr {}", str_addr);
+                                            }
                                         } else {
-                                            result.push_str("<bad string>");
+                                            // Read from stack segment
+                                            if self.debug {
+                                                 println!("DEBUG VM: PRTF - %s reading from stack address {}", str_addr);
+                                            }
+                                            let mut stack_idx = str_addr;
+                                            while stack_idx < self.stack.len() {
+                                                 let char_byte = (self.stack[stack_idx] & 0xFF) as u8;
+                                                 if char_byte == 0 {
+                                                     break;
+                                                 }
+                                                 result.push(char_byte as char);
+                                                 stack_idx += 1; // Move to the next i64 slot for the next char
+                                             }
+                                            if stack_idx == self.stack.len() {
+                                                println!("Warning: PRTF %s reached end of stack without null terminator at addr {}", str_addr);
+                                            }
                                         }
                                         arg_idx += 1;
                                     } else {
@@ -733,77 +791,28 @@ impl VM {
     }
     
     /// print debug info
-    fn print_debug_info(&self, op: usize) {
+    fn print_debug_info(&self, op: usize, addr: usize, _arg: Option<i64>) { // Arg no longer passed
         // Disable most debug output but keep important diagnostics
-        if false {  // Normal debug is disabled
+        if self.debug { // Use the VM's debug flag
             // Print cycle count and PC
-            println!("DEBUG VM: Cycle {}, PC={}", self.cycle, self.pc - 1);
-            
-            // Get opcode name
-            let opcode_name = match op {
-                x if x == OpCode::LEA as usize => "LEA",
-                x if x == OpCode::IMM as usize => "IMM",
-                x if x == OpCode::JMP as usize => "JMP",
-                x if x == OpCode::JSR as usize => "JSR",
-                x if x == OpCode::BZ as usize => "BZ",
-                x if x == OpCode::BNZ as usize => "BNZ",
-                x if x == OpCode::ENT as usize => "ENT",
-                x if x == OpCode::ADJ as usize => "ADJ",
-                x if x == OpCode::LEV as usize => "LEV",
-                x if x == OpCode::LI as usize => "LI",
-                x if x == OpCode::LC as usize => "LC",
-                x if x == OpCode::SI as usize => "SI",
-                x if x == OpCode::SC as usize => "SC",
-                x if x == OpCode::PSH as usize => "PSH",
-                x if x == OpCode::OR as usize => "OR",
-                x if x == OpCode::XOR as usize => "XOR",
-                x if x == OpCode::AND as usize => "AND",
-                x if x == OpCode::EQ as usize => "EQ",
-                x if x == OpCode::NE as usize => "NE",
-                x if x == OpCode::LT as usize => "LT",
-                x if x == OpCode::GT as usize => "GT",
-                x if x == OpCode::LE as usize => "LE",
-                x if x == OpCode::GE as usize => "GE",
-                x if x == OpCode::SHL as usize => "SHL",
-                x if x == OpCode::SHR as usize => "SHR",
-                x if x == OpCode::ADD as usize => "ADD",
-                x if x == OpCode::SUB as usize => "SUB",
-                x if x == OpCode::MUL as usize => "MUL",
-                x if x == OpCode::DIV as usize => "DIV",
-                x if x == OpCode::MOD as usize => "MOD",
-                x if x == OpCode::OPEN as usize => "OPEN",
-                x if x == OpCode::READ as usize => "READ",
-                x if x == OpCode::CLOS as usize => "CLOS",
-                x if x == OpCode::PRTF as usize => "PRTF",
-                x if x == OpCode::MALC as usize => "MALC",
-                x if x == OpCode::FREE as usize => "FREE",
-                x if x == OpCode::MSET as usize => "MSET",
-                x if x == OpCode::MCMP as usize => "MCMP",
-                x if x == OpCode::EXIT as usize => "EXIT",
-                _ => "Unknown",
-            };
+            println!("DEBUG VM: cycle = {}, PC = {}", self.cycle, self.pc);
             
             // Print opcode and AX
-            println!("DEBUG VM: Opcode={}, AX={}", opcode_name, self.ax);
+            let opcode_name = self.op_to_string(op);
+            print!("DEBUG VM: Opcode={}, AX={}", opcode_name, self.ax);
+            println!(); // Newline
             
             // Print stack pointer, base pointer
-            println!("DEBUG VM: SP={}, BP={}", self.sp, self.bp);
-            
-            // Print top of stack
-            if self.sp < self.stack.len() {
-                println!("DEBUG VM: Top of stack: {}", self.stack[self.sp]);
-            } else {
-                println!("DEBUG VM: Stack is empty");
-            }
+            println!("DEBUG VM: SP = {}, BP = {}", self.sp, self.bp);
         }
     }
     
     /// gets next code value
-    fn next_code(&mut self) -> i64 {
-        let val = self.code[self.pc];
-        self.pc += 1;
-        val
-    }
+    // fn next_code(&mut self) -> i64 { // No longer needed as args are pre-fetched
+    //     let val = self.code[self.pc];
+    //     self.pc += 1;
+    //     val
+    // }
     
     /// loads int from memory
     pub fn load_int(&self, addr: usize) -> i64 {
@@ -1015,6 +1024,20 @@ impl VM {
         }
         println!("====================");
     }
+}
+
+fn opcode_has_argument(op: u8) -> bool {
+    matches!(op,
+        x if x == OpCode::LEA as u8 ||
+             x == OpCode::IMM as u8 ||
+             x == OpCode::JMP as u8 ||
+             x == OpCode::JSR as u8 ||
+             x == OpCode::BZ as u8 ||
+             x == OpCode::BNZ as u8 ||
+             x == OpCode::ENT as u8 ||
+             x == OpCode::ADJ as u8 ||
+             x == OpCode::PRTF as u8
+    )
 }
 
 /// runs compiled code

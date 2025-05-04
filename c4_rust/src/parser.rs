@@ -32,7 +32,7 @@ impl Type {
     pub fn size(&self) -> usize {
         match self {
             Type::Char => 1,
-            Type::Int | Type::Ptr(_) => std::mem::size_of::<i64>(),
+            Type::Int | Type::Ptr(_) => std::mem::size_of::<i64>(), // Assuming 64-bit pointers/ints
             Type::Array(base, size) => base.size() * size,
         }
     }
@@ -283,7 +283,7 @@ impl<'a> Parser<'a> {
             base_type = Type::Char;
             self.next();
         } else if self.token() == Token::Void {
-            base_type = Type::Int; // void is treated as int in symbol table, but differently in function calls
+            base_type = Type::Int; // Use Int for void return type in symbol table
             self.next();
         } else if self.token() == Token::Enum {
             self.parse_enum()?;
@@ -333,14 +333,20 @@ impl<'a> Parser<'a> {
                 }
                 
                 // Variable declaration
-                let data_len = self.data.len();
+                let _data_len = self.data.len(); // Mark as unused
+                // Align data segment before adding global variables
+                while self.data.len() % std::mem::size_of::<i64>() != 0 {
+                    self.data.push(0);
+                }
+                let aligned_data_len = self.data.len();
                 let type_size = typ.size();
                 
                 // Add symbol to table with proper type
-                self.add_symbol(&name, SymbolClass::Glo, typ, data_len as i64)?;
+                self.add_symbol(&name, SymbolClass::Glo, typ, aligned_data_len as i64)?;
+                println!("DEBUG PARSER: Added global var '{}' of type {:?} at data address {}", name, self.symbols.last().unwrap().typ, aligned_data_len);
                 
                 // Add space in data segment
-                self.data.resize(data_len + type_size, 0);
+                self.data.resize(aligned_data_len + type_size, 0);
             } else {
                 return Err(format!("Line {}: Expected identifier in declaration", self.lexer.line()));
             }
@@ -435,7 +441,7 @@ impl<'a> Parser<'a> {
                 if self.token() == Token::Int {
                     _param_type = Type::Int;
                     self.next();
-                } else if self.token() == Token::Char {
+                } else if self.token() == Token::Char { // Handle char parameter type
                     _param_type = Type::Char;
                     self.next();
                 } else {
@@ -524,7 +530,7 @@ impl<'a> Parser<'a> {
                     Type::Int
                 } else {
                     self.next();
-                    Type::Char
+                    Type::Char // Handle local char variable
                 };
                 
                 // Parse local variables
@@ -613,8 +619,10 @@ impl<'a> Parser<'a> {
                             // Step 3: Store value at the address
                             if var_type == Type::Char {
                                 self.code.push(OpCode::SC as i64);
+                                println!("DEBUG PARSER: Generated SC for local char initialization");
                             } else {
                                 self.code.push(OpCode::SI as i64);
+                                println!("DEBUG PARSER: Generated SI for local int initialization");
                             }
                         }
                     } else {
@@ -774,31 +782,26 @@ impl<'a> Parser<'a> {
                 self.next();
                 self.current_type = Type::Int;
             },
-            Token::Str(str_index) => {
+            Token::Str(start_pos_in_buffer) => {
                 // Handle string literals
-                // Store the string in the data segment
-                let str_data = self.lexer.string_buffer();
                 let str_start = self.data.len();
                 
                 // Debug output
-                println!("DEBUG: String literal at index {}, content: ", str_index);
-                for i in str_index..str_data.len() {
-                    if str_data[i] == 0 { break; }
-                    print!("{}", str_data[i] as char);
-                }
-                println!("");
-                println!("DEBUG: Storing string at data segment position: {}", str_start);
+                let string_content = &self.lexer.string_buffer()[start_pos_in_buffer..];
+                let string_len = string_content.iter().position(|&c| c == 0).unwrap_or(string_content.len());
+                let string_slice = &string_content[..string_len];
+                println!(
+                    "DEBUG PARSER: String literal starting at buffer index {}, value: \"{}\"",
+                    start_pos_in_buffer,
+                    String::from_utf8_lossy(string_slice)
+                );
+                println!("DEBUG PARSER: Storing string at data segment position: {}", str_start);
                 
-                // Copy the string data into the data segment
-                let mut i = str_index;
-                while i < str_data.len() && str_data[i] != 0 {
-                    self.data.push(str_data[i]);
-                    i += 1;
-                }
-                // Add null terminator
-                self.data.push(0);
+                // Copy the string data (including null terminator) into the data segment
+                self.data.extend_from_slice(string_slice);
+                self.data.push(0); // Ensure null termination in data segment
                 
-                // Align data segment to int boundary
+                // Align data segment after string
                 while self.data.len() % std::mem::size_of::<i64>() != 0 {
                     self.data.push(0);
                 }
@@ -806,7 +809,7 @@ impl<'a> Parser<'a> {
                 // Push immediate value (address of the string in data segment)
                 self.code.push(OpCode::IMM as i64);
                 self.code.push(str_start as i64);
-                println!("DEBUG: Generated IMM {} for string address", str_start);
+                println!("DEBUG PARSER: Generated IMM {} for string address", str_start);
                 self.next();
                 
                 // Handle multiple consecutive string literals (C concatenation feature)
@@ -837,6 +840,8 @@ impl<'a> Parser<'a> {
                 }
                 
                 self.expect(Token::RightParen, "Expected ')' after type in sizeof")?;
+                
+                println!("DEBUG PARSER: sizeof type {:?} resolved to size {}", typ, typ.size());
                 
                 // Push the size of the type
                 self.code.push(OpCode::IMM as i64);
@@ -978,8 +983,10 @@ impl<'a> Parser<'a> {
                                     // Store the value
                                     if sym_type == Type::Char {
                                         self.code.push(OpCode::SC as i64);
+                                        println!("DEBUG PARSER: Generated SC (store char)");
                                     } else {
                                         self.code.push(OpCode::SI as i64);
+                                        println!("DEBUG PARSER: Generated SI (store int)");
                                     }
                                 } else if is_post_inc || is_post_dec {
                                     // Post-increment/decrement for global variable
@@ -995,8 +1002,10 @@ impl<'a> Parser<'a> {
                                     // Load original value
                                     if sym_type == Type::Char {
                                         self.code.push(OpCode::LC as i64);
+                                        println!("DEBUG PARSER: Loading char value with LC");
                                     } else {
                                         self.code.push(OpCode::LI as i64);
+                                        println!("DEBUG PARSER: Loading int value with LI");
                                     }
                                     
                                     // Save original value (will be our result)
@@ -1008,8 +1017,10 @@ impl<'a> Parser<'a> {
                                     
                                     if sym_type == Type::Char {
                                         self.code.push(OpCode::LC as i64);
+                                        println!("DEBUG PARSER: Loading char value with LC");
                                     } else {
                                         self.code.push(OpCode::LI as i64);
+                                        println!("DEBUG PARSER: Loading int value with LI");
                                     }
                                     
                                     // Add/subtract 1 (or type size for pointers)
@@ -1039,8 +1050,10 @@ impl<'a> Parser<'a> {
                                     // Store back the modified value
                                     if sym_type == Type::Char {
                                         self.code.push(OpCode::SC as i64);
+                                        println!("DEBUG PARSER: Generated SC for global post-inc/dec");
                                     } else {
                                         self.code.push(OpCode::SI as i64);
+                                        println!("DEBUG PARSER: Generated SI for global post-inc/dec");
                                     }
                                     
                                     // Original value is on stack - pop it as our result
@@ -1056,6 +1069,7 @@ impl<'a> Parser<'a> {
                                     // Based on type, load value
                                     if sym_type == Type::Char {
                                         self.code.push(OpCode::LC as i64);
+                                        println!("DEBUG PARSER: Loading char value with LC");
                                     } else {
                                         self.code.push(OpCode::LI as i64);
                                         println!("DEBUG PARSER: Loading int value with LI");
@@ -1117,8 +1131,10 @@ impl<'a> Parser<'a> {
                                         // Load original value
                                         if sym_type == Type::Char {
                                             self.code.push(OpCode::LC as i64);
+                                            println!("DEBUG PARSER: Loading char value with LC");
                                         } else {
                                             self.code.push(OpCode::LI as i64);
+                                            println!("DEBUG PARSER: Loading int value with LI");
                                         }
                                         
                                         // Save original value (will be our result)
@@ -1131,8 +1147,10 @@ impl<'a> Parser<'a> {
                                         // Load it again for modification
                                         if sym_type == Type::Char {
                                             self.code.push(OpCode::LC as i64);
+                                            println!("DEBUG PARSER: Loading char value with LC");
                                         } else {
                                             self.code.push(OpCode::LI as i64);
+                                            println!("DEBUG PARSER: Loading int value with LI");
                                         }
                                         
                                         // Add/subtract 1 (or type size for pointers)
@@ -1162,8 +1180,10 @@ impl<'a> Parser<'a> {
                                         // Store back the modified value
                                         if sym_type == Type::Char {
                                             self.code.push(OpCode::SC as i64);
+                                            println!("DEBUG PARSER: Generated SC for local post-inc/dec");
                                         } else {
                                             self.code.push(OpCode::SI as i64);
+                                            println!("DEBUG PARSER: Generated SI for local post-inc/dec");
                                         }
                                         
                                         // Original value is on stack - pop it as our result
@@ -1201,14 +1221,17 @@ impl<'a> Parser<'a> {
                 if let Type::Ptr(base_type) = &self.current_type {
                     self.current_type = (**base_type).clone();
                 } else {
-                    return Err(format!("Line {}: Cannot dereference a non-pointer type", self.lexer.line()));
+                    return Err(format!("Line {}: Cannot dereference a non-pointer type ({:?})", 
+                                          self.lexer.line(), self.current_type));
                 }
                 
                 // Generate code to load the value at the address
                 if self.current_type == Type::Char {
                     self.code.push(OpCode::LC as i64);
+                    println!("DEBUG PARSER: Generated LC for dereference");
                 } else {
                     self.code.push(OpCode::LI as i64);
+                    println!("DEBUG PARSER: Generated LI for dereference");
                 }
             },
             Token::And => {
@@ -1227,6 +1250,7 @@ impl<'a> Parser<'a> {
                 // Check if we're taking address of a string literal
                 // In C, we can take address of a string literal directly since it's already a pointer
                 if let Token::Str(_) = self.token() {
+                    println!("DEBUG PARSER: Taking address of string literal (already an address)");
                     // String literal is already an address, just keep the IMM value
                     self.current_type = Type::Ptr(Box::new(Type::Char));
                     return Ok(());
@@ -1240,6 +1264,9 @@ impl<'a> Parser<'a> {
                         // Great, it's a load instruction - we can replace it with just the address
                         self.code.pop();
                         
+                        println!("DEBUG PARSER: Address-of removed load instruction ({:?})", 
+                                 if last_instr == OpCode::LC as usize { "LC" } else { "LI" });
+                        
                         // The expression must have resulted in a memory access
                         // Transform the type of the expression to a pointer to its current type
                         self.current_type = Type::Ptr(Box::new(self.current_type.clone()));
@@ -1247,10 +1274,16 @@ impl<'a> Parser<'a> {
                         // Special case for string literals and array accesses
                         // Check if we have something like IMM addr or an array indexing operation
                         let next_to_last = self.code[code_len - 2] as usize;
+                        let value_if_imm = self.code[code_len - 1]; // The potential address
                         
                         if next_to_last == OpCode::IMM as usize {
+                            println!("DEBUG PARSER: Address-of found IMM {}", value_if_imm);
                             // This might be a string literal or a global address
                             // We'll allow taking the address of these
+                            self.current_type = Type::Ptr(Box::new(self.current_type.clone()));
+                        } else if next_to_last == OpCode::LEA as usize {
+                            println!("DEBUG PARSER: Address-of found LEA {}", value_if_imm);
+                            // This is address of local var, it's already an address
                             self.current_type = Type::Ptr(Box::new(self.current_type.clone()));
                         } else {
                             // For now, report an error if it's not a recognized addressable entity
@@ -1479,7 +1512,8 @@ impl<'a> Parser<'a> {
                         // Remove the load instruction
                         self.code.pop();
                         
-                        println!("DEBUG PARSER: Assignment detected, removed load instruction");
+                        println!("DEBUG PARSER: Assignment detected, removed load instruction ({:?})",
+                                 if last_code == OpCode::LC as usize { "LC" } else { "LI" });
                         
                         // Evaluate the right side of the assignment
                         self.expr(0)?;
@@ -2037,7 +2071,7 @@ impl<'a> Parser<'a> {
                             Type::Int
                         } else {
                             self.next();
-                            Type::Char
+                            Type::Char // Handle local char variable
                         };
                         
                         // Parse local variables
